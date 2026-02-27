@@ -6176,7 +6176,7 @@ void CMainFrame::OnDestroy()
     m_alarmlog_data.clear();
     m_Tstat_data.clear();
     m_alarmlog_data.clear();
-    m_customer_unit_data.clear();
+    m_custom_unit_data.clear();
     m_user_login_data.clear();
     m_graphic_label_data.clear();
     m_remote_point_data.clear();
@@ -12245,8 +12245,8 @@ void CMainFrame::OnControlInputs()
                         }
                         MultiByteToWideChar(CP_ACP, 0, (char*)temp_char,
                             (int)strlen((char*)temp_char) + 1,
-                            Analog_Customer_Units[i].GetBuffer(MAX_PATH), MAX_PATH);
-                        Analog_Customer_Units[i].ReleaseBuffer();
+                            Analog_Custom_Units[i].GetBuffer(MAX_PATH), MAX_PATH);
+                        Analog_Custom_Units[i].ReleaseBuffer();
                     }
 
                 }

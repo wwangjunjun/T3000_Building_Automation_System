@@ -872,7 +872,7 @@ LRESULT CBacnetOutput::Fresh_Output_List(WPARAM wParam, LPARAM lParam)
 				m_output_list.SetItemText(i, OUTPUT_RANGE, Digital_Units_Array[m_Output_data.at(i).range]);
 			else if ((m_Output_data.at(i).range >= 23) && (m_Output_data.at(i).range <= 30))
 			{
-				if (receive_customer_unit)
+				if (receive_custom_unit)
 					m_output_list.SetItemText(i, OUTPUT_RANGE, Custom_Digital_Range[m_Output_data.at(i).range - 23]);
 				else
 					m_output_list.SetItemText(i, OUTPUT_RANGE, Digital_Units_Array[0]);
@@ -898,7 +898,7 @@ LRESULT CBacnetOutput::Fresh_Output_List(WPARAM wParam, LPARAM lParam)
 					temp1 = Digital_Units_Array[m_Output_data.at(i).range];
 				else if ((m_Output_data.at(i).range >= 23) && (m_Output_data.at(i).range <= 30))
 				{
-					if (receive_customer_unit)
+					if (receive_custom_unit)
 						temp1 = Custom_Digital_Range[m_Output_data.at(i).range - 23];
 				}
 				else
@@ -1477,7 +1477,7 @@ void CBacnetOutput::OnNMClickListOutput(NMHDR *pNMHDR, LRESULT *pResult)
 			temp1 = Digital_Units_Array[m_Output_data.at(lRow).range];
 		else if((m_Output_data.at(lRow).range >=23) && (m_Output_data.at(lRow).range <= 30))
 		{
-			if(receive_customer_unit)
+			if(receive_custom_unit)
 				temp1 = Custom_Digital_Range[m_Output_data.at(lRow).range - 23];
 			else
 			{
@@ -1515,7 +1515,7 @@ void CBacnetOutput::OnNMClickListOutput(NMHDR *pNMHDR, LRESULT *pResult)
     //                temp1 = Digital_Units_Array[m_Output_data.at(lRow).range];
     //            else if ((m_Output_data.at(lRow).range >= 23) && (m_Output_data.at(lRow).range <= 30))
     //            {
-    //                if (receive_customer_unit)
+    //                if (receive_custom_unit)
     //                    temp1 = Custom_Digital_Range[m_Output_data.at(lRow).range - 23];
     //                else
     //                {
@@ -2058,7 +2058,7 @@ int GetOutputValueEx(Str_out_point temp_out, CString& ret_cstring, CString& ret_
 				temp1 = Digital_Units_Array[temp_out.range];
 			else if ((temp_out.range >= 23) && (temp_out.range <= 30))
 			{
-				if (receive_customer_unit)
+				if (receive_custom_unit)
 					temp1 = Custom_Digital_Range[temp_out.range - 23];
 			}
 			else

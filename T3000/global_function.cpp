@@ -1883,7 +1883,7 @@ int WritePrivateData(uint32_t deviceid,unsigned char n_command,unsigned char sta
     case  WRITEUNIT_T3000:
         for (int i=0; i<(end_instance-start_instance + 1); i++)
         {
-            memcpy_s(SendBuffer + i*sizeof(Str_Units_element) + HEADER_LENGTH,sizeof(Str_Units_element),&m_customer_unit_data.at(i + start_instance),sizeof(Str_Units_element));
+            memcpy_s(SendBuffer + i*sizeof(Str_Units_element) + HEADER_LENGTH,sizeof(Str_Units_element),&m_custom_unit_data.at(i + start_instance),sizeof(Str_Units_element));
         }
         break;
     case WRITE_AT_COMMAND:
@@ -4337,8 +4337,8 @@ int Bacnet_PrivateData_Deal(char * bacnet_apud_point, uint32_t len_value_type, b
 
             MultiByteToWideChar(CP_ACP, 0, (char *)temp_char,
                 (int)strlen((char *)temp_char) + 1,
-                Analog_Customer_Units[i].GetBuffer(MAX_PATH), MAX_PATH);
-            Analog_Customer_Units[i].ReleaseBuffer();
+                Analog_Custom_Units[i].GetBuffer(MAX_PATH), MAX_PATH);
+            Analog_Custom_Units[i].ReleaseBuffer();
 
             my_temp_point = my_temp_point + 9;
             for (int j = 0; j < 16; j++)
@@ -5493,32 +5493,32 @@ int Bacnet_PrivateData_Deal(char * bacnet_apud_point, uint32_t len_value_type, b
         if (end_instance == (BAC_CUSTOMER_UNITS_COUNT - 1))
         {
             end_flag = true;
-            receive_customer_unit = true;
+            receive_custom_unit = true;
         }
         for (i = start_instance; i <= end_instance; i++)
         {
-            m_customer_unit_data.at(i).direct = *(my_temp_point++);
-            memcpy_s(m_customer_unit_data.at(i).digital_units_off, 12, my_temp_point, 12);
+            m_custom_unit_data.at(i).direct = *(my_temp_point++);
+            memcpy_s(m_custom_unit_data.at(i).digital_units_off, 12, my_temp_point, 12);
             my_temp_point = my_temp_point + 12;
-            memcpy_s(m_customer_unit_data.at(i).digital_units_on, 12, my_temp_point, 12);
+            memcpy_s(m_custom_unit_data.at(i).digital_units_on, 12, my_temp_point, 12);
             my_temp_point = my_temp_point + 12;
 
             CString temp_dig_off;
             CString temp_dig_on;
-            MultiByteToWideChar(CP_ACP, 0, (char *)m_customer_unit_data.at(i).digital_units_off, (int)strlen((char *)m_customer_unit_data.at(i).digital_units_off) + 1,
+            MultiByteToWideChar(CP_ACP, 0, (char *)m_custom_unit_data.at(i).digital_units_off, (int)strlen((char *)m_custom_unit_data.at(i).digital_units_off) + 1,
                 temp_dig_off.GetBuffer(MAX_PATH), MAX_PATH);
             temp_dig_off.ReleaseBuffer();
             if (temp_dig_off.GetLength() >= 12)
                 temp_dig_off.Empty();
 
-            MultiByteToWideChar(CP_ACP, 0, (char *)m_customer_unit_data.at(i).digital_units_on, (int)strlen((char *)m_customer_unit_data.at(i).digital_units_on) + 1,
+            MultiByteToWideChar(CP_ACP, 0, (char *)m_custom_unit_data.at(i).digital_units_on, (int)strlen((char *)m_custom_unit_data.at(i).digital_units_on) + 1,
                 temp_dig_on.GetBuffer(MAX_PATH), MAX_PATH);
             temp_dig_on.ReleaseBuffer();
             if (temp_dig_on.GetLength() >= 12)
                 temp_dig_on.Empty();
 
             //判断正反向逻辑 ，正逻辑处理方式如同  Range 1    负逻辑如同 12;
-            if (m_customer_unit_data.at(i).direct == DIGITAL_DIRECT)
+            if (m_custom_unit_data.at(i).direct == DIGITAL_DIRECT)
             {
                 cus_digital_off[i] = temp_dig_off;
                 cus_digital_on[i] = temp_dig_on;
@@ -5528,7 +5528,7 @@ int Bacnet_PrivateData_Deal(char * bacnet_apud_point, uint32_t len_value_type, b
                 cus_digital_off[i] = temp_dig_on;
                 cus_digital_on[i] = temp_dig_off;
             }
-            //cus_direction[i] = m_customer_unit_data.at(i).direct;
+            //cus_direction[i] = m_custom_unit_data.at(i).direct;
 
             Custom_Digital_Range[i] = cus_digital_off[i] + _T("/") + cus_digital_on[i];
 
@@ -11084,7 +11084,7 @@ int LoadBacnetBinaryFile(int write_to_device,LPCTSTR tem_read_path)
 						temp_digital_unit_code = temp_digital_unit_code.Right(temp_digital_unit_code.GetLength()-2);
 						temp_buffer[x] = Str_to_Byte(temp_value);
 					}
-					memcpy(&m_customer_unit_data.at(i),temp_buffer,sizeof(Str_Units_element));
+					memcpy(&m_custom_unit_data.at(i),temp_buffer,sizeof(Str_Units_element));
 				}
 
 			}
@@ -11336,17 +11336,17 @@ int LoadBacnetBinaryFile(int write_to_device,LPCTSTR tem_read_path)
 
 			for (int i=0; i<BAC_CUSTOMER_UNITS_COUNT; i++)
 			{
-				memcpy(&m_customer_unit_data.at(i),temp_point,sizeof(Str_Units_element));
+				memcpy(&m_custom_unit_data.at(i),temp_point,sizeof(Str_Units_element));
 				temp_point = temp_point + sizeof(Str_Units_element);
 
                 //2018 07 23 对于虚拟设备 在加载时 解析 客户自定义的 range
-                MultiByteToWideChar(CP_ACP, 0, (char *)m_customer_unit_data.at(i).digital_units_off, (int)strlen((char *)m_customer_unit_data.at(i).digital_units_off) + 1,
+                MultiByteToWideChar(CP_ACP, 0, (char *)m_custom_unit_data.at(i).digital_units_off, (int)strlen((char *)m_custom_unit_data.at(i).digital_units_off) + 1,
                     cus_digital_off[i].GetBuffer(MAX_PATH), MAX_PATH);
                 cus_digital_off[i].ReleaseBuffer();
                 if (cus_digital_off[i].GetLength() >= 12)
                     cus_digital_off[i].Empty();
 
-                MultiByteToWideChar(CP_ACP, 0, (char *)m_customer_unit_data.at(i).digital_units_on, (int)strlen((char *)m_customer_unit_data.at(i).digital_units_on) + 1,
+                MultiByteToWideChar(CP_ACP, 0, (char *)m_custom_unit_data.at(i).digital_units_on, (int)strlen((char *)m_custom_unit_data.at(i).digital_units_on) + 1,
                     cus_digital_on[i].GetBuffer(MAX_PATH), MAX_PATH);
                 cus_digital_on[i].ReleaseBuffer();
                 if (cus_digital_on[i].GetLength() >= 12)
@@ -12661,7 +12661,7 @@ void SaveBacnetBinaryFile(CString &SaveConfigFilePath)
 
     for (int i = 0; i<BAC_CUSTOMER_UNITS_COUNT; i++)
     {
-        memcpy(temp_point, &m_customer_unit_data.at(i), sizeof(Str_Units_element));
+        memcpy(temp_point, &m_custom_unit_data.at(i), sizeof(Str_Units_element));
         temp_point = temp_point + sizeof(Str_Units_element);
     }
 
@@ -13344,7 +13344,7 @@ void ClearBacnetData()
 
     for (int i = 0; i<BAC_CUSTOMER_UNITS_COUNT; i++)
     {
-        memset(&m_customer_unit_data.at(i), 0, sizeof(Str_Units_element));
+        memset(&m_custom_unit_data.at(i), 0, sizeof(Str_Units_element));
     }
 
     for (int i = 0; i<BAC_ALALOG_CUSTMER_RANGE_TABLE_COUNT; i++)
@@ -17540,7 +17540,7 @@ void Initial_All_Point()
     m_monitor_data.clear();
     m_alarmlog_data.clear();
     m_Tstat_data.clear();
-    m_customer_unit_data.clear();
+    m_custom_unit_data.clear();
     m_user_login_data.clear();
     m_tatat_schedule_data.clear();
     m_msv_data.clear();
@@ -17666,7 +17666,7 @@ void Initial_All_Point()
     {
         Str_Units_element temp_customer_units = { 0 };
         memset(&temp_customer_units, 0, sizeof(Str_Units_element));
-        m_customer_unit_data.push_back(temp_customer_units);
+        m_custom_unit_data.push_back(temp_customer_units);
     }
 
     for (int i = 0; i < BAC_USER_LOGIN_COUNT; i++)
@@ -17824,7 +17824,7 @@ void VariableDataToString(Str_variable_point source_variable, Variable_CString* 
                 temp1 = Digital_Units_Array[source_variable.range];
             else if ((source_variable.range >= 23) && (source_variable.range <= 30))
             {
-                if (receive_customer_unit)
+                if (receive_custom_unit)
                     temp1 = Custom_Digital_Range[source_variable.range - 23];
             }
             else
@@ -17997,7 +17997,7 @@ void OutputDataToString(Str_out_point source_output, Output_CString* ret_string)
             ret_string->range = Digital_Units_Array[source_output.range];
         else if ((source_output.range >= 23) && (source_output.range <= 30))
         {
-            if (receive_customer_unit)
+            if (receive_custom_unit)
                 ret_string->range = Custom_Digital_Range[source_output.range - 23];
             else
                 ret_string->range = Digital_Units_Array[0];
@@ -18017,7 +18017,7 @@ void OutputDataToString(Str_out_point source_output, Output_CString* ret_string)
                 temp1 = Digital_Units_Array[source_output.range];
             else if ((source_output.range >= 23) && (source_output.range <= 30))
             {
-                if (receive_customer_unit)
+                if (receive_custom_unit)
                     temp1 = Custom_Digital_Range[source_output.range - 23];
             }
             else
@@ -18405,7 +18405,7 @@ int LoadPanelRange(unsigned char npanel)  //分离出每个panel的  range 标�
 			{
                 if (npanel == bac_gloab_panel)
                 {
-                    WebView_Input_range[i].Ranges.analog_range.range_name = Analog_Customer_Units[g_Input_data[npanel].at(i).range - 20];
+                    WebView_Input_range[i].Ranges.analog_range.range_name = Analog_Custom_Units[g_Input_data[npanel].at(i).range - 20];
                     WebView_Input_range[i].Ranges.analog_range.range_max = 9999; //待定
                     WebView_Input_range[i].Ranges.analog_range.range_min = 0; //待定
                     //WebView_Input_range[i].Ranges.analog_range.unites = m_analog_custmer_range.at(g_Input_data[npanel].at(i).range - 20).table_name;
@@ -18492,7 +18492,7 @@ void InputDataToString(Str_in_point source_input, Input_CString* ret_string)
     {
         if ((source_input.range >= 20) && (source_input.range <= 24))
         {
-            temp_units = Analog_Customer_Units[source_input.range - 20];
+            temp_units = Analog_Custom_Units[source_input.range - 20];
 
         }
         else if (source_input.range < (sizeof(Input_List_Analog_Units) / sizeof(Input_List_Analog_Units[0])))
@@ -18571,7 +18571,7 @@ void InputDataToString(Str_in_point source_input, Input_CString* ret_string)
             temp_range = Digital_Units_Array[source_input.range];
         else if ((source_input.range >= 23) && (source_input.range <= 30))
         {
-            if (receive_customer_unit)
+            if (receive_custom_unit)
                 temp_range = Custom_Digital_Range[source_input.range - 23];
             else
                 temp_range = Digital_Units_Array[0];
@@ -18593,7 +18593,7 @@ void InputDataToString(Str_in_point source_input, Input_CString* ret_string)
                 temp1 = Digital_Units_Array[source_input.range];
             else if ((source_input.range >= 23) && (source_input.range <= 30))
             {
-                if (receive_customer_unit)
+                if (receive_custom_unit)
                     temp1 = Custom_Digital_Range[source_input.range - 23];
             }
 

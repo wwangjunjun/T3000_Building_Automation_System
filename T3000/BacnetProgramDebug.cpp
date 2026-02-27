@@ -624,7 +624,7 @@ int CBacnetProgramDebug::Fresh_Program_List(unsigned int list_type)
 				m_program_debug_list.SetItemText(0, OUTPUT_RANGE, Digital_Units_Array[m_Output_data.at(point_number).range]);
 			else if ((m_Output_data.at(point_number).range >= 23) && (m_Output_data.at(point_number).range <= 30))
 			{
-				if (receive_customer_unit)
+				if (receive_custom_unit)
 					m_program_debug_list.SetItemText(0, OUTPUT_RANGE, Custom_Digital_Range[m_Output_data.at(point_number).range - 23]);
 				else
 					m_program_debug_list.SetItemText(0, OUTPUT_RANGE, Digital_Units_Array[0]);
@@ -645,7 +645,7 @@ int CBacnetProgramDebug::Fresh_Program_List(unsigned int list_type)
 					temp1 = Digital_Units_Array[m_Output_data.at(point_number).range];
 				else if ((m_Output_data.at(point_number).range >= 23) && (m_Output_data.at(point_number).range <= 30))
 				{
-					if (receive_customer_unit)
+					if (receive_custom_unit)
 						temp1 = Custom_Digital_Range[m_Output_data.at(point_number).range - 23];
 				}
 				else
@@ -775,7 +775,7 @@ int CBacnetProgramDebug::Fresh_Program_List(unsigned int list_type)
 				m_program_debug_list.SetItemText(0, INPUT_RANGE, Digital_Units_Array[m_Input_data.at(point_number).range]);
 			else if ((m_Input_data.at(point_number).range >= 23) && (m_Input_data.at(point_number).range <= 30))
 			{
-				if (receive_customer_unit)
+				if (receive_custom_unit)
 					m_program_debug_list.SetItemText(0, INPUT_RANGE, Custom_Digital_Range[m_Input_data.at(point_number).range - 23]);
 				else
 					m_program_debug_list.SetItemText(0, INPUT_RANGE, Digital_Units_Array[0]);
@@ -797,7 +797,7 @@ int CBacnetProgramDebug::Fresh_Program_List(unsigned int list_type)
 					temp1 = Digital_Units_Array[m_Input_data.at(point_number).range];
 				else if ((m_Input_data.at(point_number).range >= 23) && (m_Input_data.at(point_number).range <= 30))
 				{
-					if (receive_customer_unit)
+					if (receive_custom_unit)
 						temp1 = Custom_Digital_Range[m_Input_data.at(point_number).range - 23];
 				}
 
@@ -967,7 +967,7 @@ int CBacnetProgramDebug::Fresh_Program_List(unsigned int list_type)
 					temp1 = Digital_Units_Array[m_Variable_data.at(point_number).range];
 				else if ((m_Variable_data.at(point_number).range >= 23) && (m_Variable_data.at(point_number).range <= 30))
 				{
-					if (receive_customer_unit)
+					if (receive_custom_unit)
 						temp1 = Custom_Digital_Range[m_Variable_data.at(point_number).range - 23];
 				}
 				else
@@ -1271,7 +1271,7 @@ int CBacnetProgramDebug::Fresh_Program_List(unsigned int list_type)
 									temp1 = Digital_Units_Array[m_Variable_data.at(x).range];
 								else if ((m_Variable_data.at(x).range >= 23) && (m_Variable_data.at(x).range <= 30))
 								{
-									if (receive_customer_unit)
+									if (receive_custom_unit)
 										temp1 = Custom_Digital_Range[m_Variable_data.at(x).range - 23];
 								}
 
@@ -2170,7 +2170,7 @@ void CBacnetProgramDebug::OnNMClickListProgramDebug(NMHDR *pNMHDR, LRESULT *pRes
 					temp1 = Digital_Units_Array[m_Output_data.at(point_number).range];
 				else if((m_Output_data.at(point_number).range >=23) && (m_Output_data.at(point_number).range <= 30))
 				{
-					if(receive_customer_unit)
+					if(receive_custom_unit)
 						temp1 = Custom_Digital_Range[m_Output_data.at(point_number).range - 23];
 					else
 					{
@@ -2405,7 +2405,7 @@ void CBacnetProgramDebug::OnNMClickListProgramDebug(NMHDR *pNMHDR, LRESULT *pRes
 					temp1 = Digital_Units_Array[m_Input_data.at(point_number).range];
 				else if((m_Input_data.at(point_number).range >=23) && (m_Input_data.at(point_number).range <= 30))
 				{
-					if(receive_customer_unit)
+					if(receive_custom_unit)
 						temp1 = Custom_Digital_Range[m_Input_data.at(point_number).range - 23];
 					else
 					{
@@ -2696,7 +2696,7 @@ void CBacnetProgramDebug::OnNMClickListProgramDebug(NMHDR *pNMHDR, LRESULT *pRes
 					temp1 = Digital_Units_Array[m_Variable_data.at(point_number).range];
 				else if((m_Variable_data.at(point_number).range >=23) && (m_Variable_data.at(point_number).range <= 30))
 				{
-					if(receive_customer_unit)
+					if(receive_custom_unit)
 						temp1 = Custom_Digital_Range[m_Variable_data.at(point_number).range - 23];
 					else
 					{
