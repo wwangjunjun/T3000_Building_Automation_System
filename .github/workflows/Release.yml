@@ -1,4 +1,5 @@
-# This workflow now builds T3000Controls and BACnetStackLibrary components
+# This workflow builds T3000Controls and BACnetStackLibrary components,
+# signs them via SignPath (with full origin verification), then publishes.
 
 name: Release
 
@@ -6,7 +7,17 @@ on:
   release:
     types: [published]
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+# ---------------------------------------------------------------------------
+# Required for SignPath origin verification.
+# id-token:write  -> OIDC token so SignPath can confirm this running workflow
+# actions:read    -> SignPath connector reads workflow-job details
+# contents:write  -> needed to upload release assets
+# ---------------------------------------------------------------------------
+permissions:
+  id-token: write
+  contents: write
+  actions: read
+
 jobs:
   release:
     runs-on: windows-latest
@@ -62,7 +73,7 @@ jobs:
         run: |
           msbuild "T3000 - VS2019.sln" /p:Platform=x86 /p:Configuration=Release /p:ProjectVersion=${{ steps.version.outputs.version }}
 
-      - name: Clean & Orgenize Files
+      - name: Clean & Organize Files
         continue-on-error: true
         run: |
           del "T3000 Output\release\*.pdb"
@@ -74,6 +85,70 @@ jobs:
           xcopy "T3000Webview\dist\spa\" "T3000 Output\release\ResourceFile\webview\www\" /E /H /C /I /y
           xcopy "T3000Webview\api\target\i686-pc-windows-msvc\release\t3_webview_api.dll" "T3000 Output\release\" /Y
           xcopy "T3000Webview\api\target\i686-pc-windows-msvc\release\t3_webview_api.dll.lib" "T3000 Output\release\" /Y
+
+      # -----------------------------------------------------------------------
+      # PE SIGNING (origin-verification-compliant)
+      # See Build.yml comments for full explanation of the approach.
+      # One-time prerequisites:
+      #   * Install SignPath GitHub App on this repository
+      #   * Link "GitHub.com" Trusted Build System in SignPath to this project
+      #   * Artifact configs (Sign-PE / Sign-MSI) must use <zip-file> as root
+      # -----------------------------------------------------------------------
+
+      - name: Stage PE files for signing
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "signing-input" -Force
+          $filesToSign = @(
+            "T3000 Output\release\T3000.exe",
+            "T3000 Output\release\BacnetExplore.exe",
+            "T3000 Output\release\ISP.exe",
+            "T3000 Output\release\ModbusPoll.exe",
+            "T3000 Output\release\Update.exe",
+            "T3000 Output\release\BACnet_Stack_Library.dll",
+            "T3000 Output\release\FlexSlideBar.dll",
+            "T3000 Output\release\ModbusDllforVc.dll",
+            "T3000 Output\release\T3000Controls.dll",
+            "T3000 Output\release\t3_webview_api.dll"
+          )
+          $missing = @()
+          foreach ($file in $filesToSign) {
+            if (-not (Test-Path $file)) {
+              $missing += $file; Write-Host "MISSING: $file"
+            } else {
+              Copy-Item $file "signing-input\" -Force
+              Write-Host "Staged: $(Split-Path $file -Leaf)"
+            }
+          }
+          if ($missing.Count -gt 0) { Write-Error "Missing $($missing.Count) file(s)"; exit 1 }
+
+      - name: Upload unsigned PE files as GitHub artifact
+        id: upload-pe
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-binaries
+          path: signing-input/
+
+      - name: Sign PE files with SignPath
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+          organization-id: '${{ secrets.SIGNPATH_ORGANIZATION_ID }}'
+          project-slug: '${{ secrets.SIGNPATH_PROJECT_SLUG }}'
+          signing-policy-slug: '${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}'
+          artifact-configuration-slug: 'Sign-PE'
+          github-artifact-id: '${{ steps.upload-pe.outputs.artifact-id }}'
+          wait-for-completion: true
+          output-artifact-directory: 'signed-binaries'
+          github-token: '${{ secrets.GITHUB_TOKEN }}'
+
+      - name: Copy signed PE files back to release directory
+        shell: pwsh
+        run: |
+          Get-ChildItem "signed-binaries" -Recurse -File | ForEach-Object {
+            Copy-Item $_.FullName "T3000 Output\release\" -Force
+            Write-Host "Restored signed: $($_.Name)"
+          }
 
       - name: Set the installer version ( doesn't accept big numbers so we add a point )
         id: iversion
@@ -98,6 +173,38 @@ jobs:
             SetProductCode -langid 1033
             SetVersion ${{ steps.iversion.outputs.iversion }}
 
+      # -----------------------------------------------------------------------
+      # MSI SIGNING
+      # -----------------------------------------------------------------------
+
+      - name: Upload unsigned MSI as GitHub artifact
+        id: upload-msi
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: setup/T3000-setup.msi
+
+      - name: Sign MSI installer with SignPath
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+          organization-id: '${{ secrets.SIGNPATH_ORGANIZATION_ID }}'
+          project-slug: '${{ secrets.SIGNPATH_PROJECT_SLUG }}'
+          signing-policy-slug: '${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}'
+          artifact-configuration-slug: 'Sign-MSI'
+          github-artifact-id: '${{ steps.upload-msi.outputs.artifact-id }}'
+          wait-for-completion: true
+          output-artifact-directory: 'signed-installer'
+          github-token: '${{ secrets.GITHUB_TOKEN }}'
+
+      - name: Move signed MSI back to setup directory
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem "signed-installer" -Recurse -Filter "*.msi" | Select-Object -First 1
+          if (-not $msi) { Write-Error "Signed MSI not found"; exit 1 }
+          Copy-Item $msi.FullName "setup\T3000-setup.msi" -Force
+          Write-Host "Signed MSI restored."
+
       - name: Upload the installer file to the release assets
         id: releaseFile
         uses: shogo82148/actions-upload-release-asset@v1
@@ -119,19 +226,19 @@ jobs:
         run: |
           mkdir -p $HOME\.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > $HOME\.ssh\id_rsa
-          chmod 600 $HOME\.ssh\id_rsa  # Correct permissions for SSH key
+          chmod 600 $HOME\.ssh\id_rsa
         shell: bash
 
       - name: Upload the update file via SCP
         run: |
           scp -i $HOME\.ssh\id_rsa -o StrictHostKeyChecking=no -P 22 ./20T3000Update.zip ${{ secrets.FTP_USER }}@${{ vars.FTP_HOST }}:/home/bravoftp/software/
         shell: bash
-        
+
       - name: Upload the software installer file via SCP
         run: |
           scp -i $HOME\.ssh\id_rsa -o StrictHostKeyChecking=no -P 22 ./09T3000Software.zip ${{ secrets.FTP_USER }}@${{ vars.FTP_HOST }}:/home/bravoftp/software/
         shell: bash
-        
+
       - name: Update T3000 version in the INI file
         id: webhookRequest
         uses: fjogeleit/http-request-action@v1

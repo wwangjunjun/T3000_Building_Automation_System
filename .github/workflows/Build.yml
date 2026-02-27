@@ -2,6 +2,18 @@ name: Build
 
 on: workflow_dispatch
 
+# ---------------------------------------------------------------------------
+# These permissions are REQUIRED for SignPath origin verification.
+# id-token:write  -> lets GitHub issue an OIDC token so SignPath can confirm
+#                    "this artifact was produced by THIS workflow run".
+# actions:read    -> lets the SignPath connector read workflow-job details.
+# contents:read   -> needed for checkout.
+# ---------------------------------------------------------------------------
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
 jobs:
   build:
     runs-on: windows-latest
@@ -42,7 +54,7 @@ jobs:
       - name: Get T3000 version number
         id: version
         run: |
-          $version = Get-Date -Format “yyyyMMdd”
+          $version = Get-Date -Format "yyyyMMdd"
           Write-Output version=$version >> $Env:GITHUB_OUTPUT
 
       - name: Setup MSBuild
@@ -52,7 +64,7 @@ jobs:
         run: |
           msbuild "T3000 - VS2019.sln" /p:Platform=x86 /p:Configuration=Release /p:ProjectVersion=${{ steps.version.outputs.version }}
 
-      - name: Clean & Orgenize Files
+      - name: Clean & Organize Files
         continue-on-error: true
         run: |
           del "T3000 Output\release\*.pdb"
@@ -65,12 +77,38 @@ jobs:
           xcopy "T3000Webview\api\target\i686-pc-windows-msvc\release\t3_webview_api.dll" "T3000 Output\release\" /Y
           xcopy "T3000Webview\api\target\i686-pc-windows-msvc\release\t3_webview_api.dll.lib" "T3000 Output\release\" /Y
 
-      - name: Sign all executables and DLLs with SignPath
+      # -----------------------------------------------------------------------
+      # SIGNING - origin-verification-compliant approach
+      #
+      # SignPath must verify:
+      #   1. The artifact was built by GitHub Actions (proven via OIDC token)
+      #   2. It came from this exact repository + workflow run
+      #   3. The artifact was stored as a GitHub Actions artifact *before*
+      #      the signing request was submitted (not POSTed directly as bytes)
+      #
+      # Flow:
+      #   a) Stage the PE files -> upload-artifact@v4 (GitHub zips them)
+      #   b) signpath/github-action-submit-signing-request@v2 submits the
+      #      *GitHub artifact ID* (not the file bytes), waits, then downloads
+      #      the signed zip to output-artifact-directory
+      #   c) Copy signed files back over the release folder
+      #   d) Same pattern for the MSI installer
+      #
+      # One-time prerequisites (GitHub + SignPath UI):
+      #   * Install the SignPath GitHub App on this repository
+      #     https://github.com/apps/signpath
+      #   * Add the "GitHub.com" Trusted Build System in SignPath and link it
+      #     to this project
+      #   * Update the SignPath artifact configurations (Sign-PE / Sign-MSI)
+      #     to use <zip-file> as the root element, because GitHub Actions
+      #     always wraps artifacts in a ZIP archive
+      # -----------------------------------------------------------------------
+
+      - name: Stage PE files for signing
         shell: pwsh
         run: |
-          Write-Host "Preparing files for signing with SignPath..."
+          New-Item -ItemType Directory -Path "signing-input" -Force
 
-          # Define files to sign (only OUR files, exclude 3rd party libraries)
           $filesToSign = @(
             "T3000 Output\release\T3000.exe",
             "T3000 Output\release\BacnetExplore.exe",
@@ -84,238 +122,61 @@ jobs:
             "T3000 Output\release\t3_webview_api.dll"
           )
 
-          # Exclude 3rd party libraries that we don't own:
-          # - sqlite3.dll (SQLite project)
-          # - WebView2Loader.dll (Microsoft)
+          # Excluded (3rd-party, not owned by Temco):
+          #   sqlite3.dll        - SQLite Consortium
+          #   WebView2Loader.dll - Microsoft
 
-          Write-Host "Files to sign: $($filesToSign.Count)"
-          Write-Host ""
-
-          # Verify all files exist before signing
-          $missingFiles = @()
+          $missing = @()
           foreach ($file in $filesToSign) {
             if (-not (Test-Path $file)) {
-              $missingFiles += $file
-              Write-Host "  ✗ MISSING: $file"
+              $missing += $file
+              Write-Host "MISSING: $file"
             } else {
-              Write-Host "  ✓ Found: $file"
+              Copy-Item $file "signing-input\" -Force
+              Write-Host "Staged: $(Split-Path $file -Leaf)"
             }
           }
-
-          if ($missingFiles.Count -gt 0) {
-            Write-Error "Missing $($missingFiles.Count) files that need to be signed"
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing $($missing.Count) file(s) to sign"
             exit 1
           }
 
-          Write-Host ""
-          Write-Host "Starting individual file signing..."
-          Write-Host ""
+      # upload-artifact@v4 zips the staged directory automatically.
+      # SignPath reads this zip from GitHub (not from our runner), signs all
+      # PE files inside it, and returns a new zip with signed binaries.
+      - name: Upload unsigned PE files as GitHub artifact
+        id: upload-pe
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-binaries
+          path: signing-input/
 
-          # Sign each file individually
-          $signedCount = 0
-          $failedFiles = @()
+      # The official SignPath action provides origin verification because:
+      #   - It reads the OIDC token to prove it runs in THIS workflow
+      #   - It passes the GitHub artifact-id (not raw bytes), so SignPath
+      #     can fetch the artifact directly from GitHub and confirm provenance
+      - name: Sign PE files with SignPath
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+          organization-id: '${{ secrets.SIGNPATH_ORGANIZATION_ID }}'
+          project-slug: '${{ secrets.SIGNPATH_PROJECT_SLUG }}'
+          signing-policy-slug: '${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}'
+          artifact-configuration-slug: 'Sign-PE'
+          github-artifact-id: '${{ steps.upload-pe.outputs.artifact-id }}'
+          wait-for-completion: true
+          output-artifact-directory: 'signed-binaries'
+          github-token: '${{ secrets.GITHUB_TOKEN }}'
 
-          foreach ($file in $filesToSign) {
-            $fileName = Split-Path $file -Leaf
-            Write-Host "[$($signedCount + 1)/$($filesToSign.Count)] Signing: $fileName"
-
-            try {
-              # Submit to SignPath
-              $response = Invoke-RestMethod `
-                -Uri "https://app.signpath.io/API/v1/${{ secrets.SIGNPATH_ORGANIZATION_ID }}/SigningRequests" `
-                -Method POST `
-                -Headers @{ "Authorization" = "Bearer ${{ secrets.SIGNPATH_API_TOKEN }}" } `
-                -Form @{
-                  "Artifact" = Get-Item $file
-                  "ProjectSlug" = "${{ secrets.SIGNPATH_PROJECT_SLUG }}"
-                  "SigningPolicySlug" = "${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}"
-                  "ArtifactConfigurationSlug" = "Sign-PE"
-                }
-
-              $signingRequestId = $response.SigningRequestId
-              Write-Host "  Request ID: $signingRequestId"
-
-              # Wait for signing to complete (max 10 minutes per file)
-              $maxWaitSeconds = 600
-              $elapsedSeconds = 0
-              $lastStatus = ""
-
-              do {
-                Start-Sleep -Seconds 10
-                $elapsedSeconds += 10
-
-                $status = Invoke-RestMethod `
-                  -Uri "https://app.signpath.io/API/v1/${{ secrets.SIGNPATH_ORGANIZATION_ID }}/SigningRequests/$signingRequestId" `
-                  -Headers @{ "Authorization" = "Bearer ${{ secrets.SIGNPATH_API_TOKEN }}" }
-
-                if ($status.Status -ne $lastStatus) {
-                  Write-Host "  Status: $($status.Status) ($($elapsedSeconds)s elapsed)"
-                  $lastStatus = $status.Status
-                }
-
-                if ($status.ErrorMessage) {
-                  Write-Host "  Error: $($status.ErrorMessage)"
-                }
-
-                if ($elapsedSeconds -ge $maxWaitSeconds) {
-                  throw "Timeout waiting for signing to complete"
-                }
-              } while ($status.Status -eq "Processing" -or $status.Status -eq "Submitted" -or $status.Status -eq "InProgress")
-
-              if ($status.Status -eq "Completed") {
-                # Download signed file
-                Write-Host "  Downloading signed artifact..."
-                Invoke-RestMethod `
-                  -Uri "https://app.signpath.io/API/v1/${{ secrets.SIGNPATH_ORGANIZATION_ID }}/SigningRequests/$signingRequestId/SignedArtifact" `
-                  -Headers @{ "Authorization" = "Bearer ${{ secrets.SIGNPATH_API_TOKEN }}" } `
-                  -OutFile $file
-
-                # Verify file was downloaded and has correct size
-                if (Test-Path $file) {
-                  $fileSize = (Get-Item $file).Length
-                  Write-Host "  Downloaded file size: $fileSize bytes"
-
-                  # Give Windows a moment to release file handle
-                  Start-Sleep -Seconds 2
-
-                  # Verify signature immediately after download
-                  $sig = Get-AuthenticodeSignature $file
-                  Write-Host "  Signature check result:"
-                  Write-Host "    - Status: $($sig.Status)"
-                  Write-Host "    - StatusMessage: $($sig.StatusMessage)"
-                  if ($sig.SignerCertificate) {
-                    Write-Host "    - Signer: $($sig.SignerCertificate.Subject)"
-                    Write-Host "    - Thumbprint: $($sig.SignerCertificate.Thumbprint)"
-                    Write-Host "    - Valid From: $($sig.SignerCertificate.NotBefore)"
-                    Write-Host "    - Valid To: $($sig.SignerCertificate.NotAfter)"
-                  } else {
-                    Write-Host "    - SignerCertificate: NULL"
-                  }
-
-                  if ($sig.Status -ne 'Valid') {
-                    Write-Warning "File signed but signature verification returned: $($sig.Status)"
-                    Write-Warning "This may be expected in GitHub Actions - continuing anyway"
-                  }
-                } else {
-                  throw "Downloaded file not found at: $file"
-                }
-
-                Write-Host "  ✓ Successfully signed: $fileName"
-                Write-Host ""
-                $signedCount++
-              } else {
-                throw "Signing failed with status: $($status.Status)"
-              }
-
-            } catch {
-              Write-Error "  ✗ Failed to sign $fileName : $_"
-              $failedFiles += $fileName
-              Write-Host ""
-            }
-          }
-
-          Write-Host "=========================================="
-          Write-Host "Signing Summary:"
-          Write-Host "  Total files: $($filesToSign.Count)"
-          Write-Host "  Successfully signed: $signedCount"
-          Write-Host "  Failed: $($failedFiles.Count)"
-          Write-Host "=========================================="
-
-          if ($failedFiles.Count -gt 0) {
-            Write-Error "Failed to sign $($failedFiles.Count) files:"
-            $failedFiles | ForEach-Object { Write-Error "  - $_" }
-            exit 1
-          }
-
-          Write-Host "✓ All Temco files signed successfully"
-
-      - name: Verify all files are signed before MSI build
+      - name: Copy signed PE files back to release directory
         shell: pwsh
         run: |
-          Write-Host "=========================================="
-          Write-Host "Verifying signed EXE and DLL files..."
-          Write-Host "=========================================="
-          Write-Host ""
-
-          # Give Windows time to flush file handles
-          Start-Sleep -Seconds 3
-
-          # Only verify OUR files (exclude 3rd party libraries we don't sign)
-          $filesToVerify = @(
-            "T3000 Output\release\T3000.exe",
-            "T3000 Output\release\BacnetExplore.exe",
-            "T3000 Output\release\ISP.exe",
-            "T3000 Output\release\ModbusPoll.exe",
-            "T3000 Output\release\Update.exe",
-            "T3000 Output\release\BACnet_Stack_Library.dll",
-            "T3000 Output\release\FlexSlideBar.dll",
-            "T3000 Output\release\ModbusDllforVc.dll",
-            "T3000 Output\release\T3000Controls.dll",
-            "T3000 Output\release\t3_webview_api.dll"
-          )
-
-          $unsignedFiles = @()
-          $signedCount = 0
-          $thirdPartyFiles = @("sqlite3.dll", "WebView2Loader.dll")
-
-          foreach ($filePath in $filesToVerify) {
-            if (-not (Test-Path $filePath)) {
-              Write-Host "✗ MISSING: $filePath"
-              $unsignedFiles += $filePath
-              continue
-            }
-
-            $sig = Get-AuthenticodeSignature $filePath
-
-            if ($sig.Status -eq 'Valid') {
-              $signedCount++
-              $fileName = Split-Path $filePath -Leaf
-              Write-Host "✓ Signed: $fileName"
-              Write-Host "  Signer: $($sig.SignerCertificate.Subject)"
-            } else {
-              $unsignedFiles += $filePath
-              $fileName = Split-Path $filePath -Leaf
-              Write-Host "✗ NOT SIGNED: $fileName - Status: $($sig.Status)"
-            }
+          $signedFiles = Get-ChildItem "signed-binaries" -Recurse -File
+          foreach ($f in $signedFiles) {
+            Copy-Item $f.FullName "T3000 Output\release\" -Force
+            Write-Host "Restored signed: $($f.Name)"
           }
-
-          Write-Host ""
-          Write-Host "===== SIGNATURE VERIFICATION SUMMARY ====="
-          Write-Host "Our files checked: $($filesToVerify.Count)"
-          Write-Host "Successfully signed: $signedCount"
-          Write-Host "Failed/Unsigned: $($unsignedFiles.Count)"
-          Write-Host ""
-          Write-Host "Third-party files (not signed by us):"
-          foreach ($file in $thirdPartyFiles) {
-            Write-Host "  ℹ $file (Microsoft/Open Source)"
-          }
-          Write-Host "=========================================="
-
-          # NOTE: In GitHub Actions, Get-AuthenticodeSignature may return UnknownError
-          # even for properly signed files due to the build environment not having
-          # the required root certificates. The actual signature is still valid and will
-          # work on end-user systems. We verify signatures immediately after SignPath
-          # signing in the previous step.
-
-          if ($unsignedFiles.Count -gt 0) {
-            Write-Warning ""
-            Write-Warning "Found $($unsignedFiles.Count) files with UnknownError status"
-            Write-Warning "This is expected in GitHub Actions environment"
-            Write-Warning "Files were verified immediately after SignPath signing"
-            Write-Warning ""
-            $unsignedFiles | ForEach-Object {
-              $fileName = Split-Path $_ -Leaf
-              Write-Host "  - $fileName (signed by SignPath)"
-            }
-            Write-Host ""
-            Write-Host "✓ All files were signed by SignPath and verified in previous step"
-            Write-Host "✓ Continuing with MSI packaging..."
-          } else {
-            Write-Host ""
-            Write-Host "✓ All Temco executables and DLLs verified as properly signed"
-          }
-
-          Write-Host "✓ Ready for MSI packaging"
+          Write-Host "All signed PE files copied back to release directory."
 
       - name: Set the installer version ( doesn't accept big numbers so we add a point )
         id: iversion
@@ -340,138 +201,33 @@ jobs:
             SetProductCode -langid 1033
             SetVersion ${{ steps.iversion.outputs.iversion }}
 
-      - name: Sign the MSI installer with SignPath
+      - name: Upload unsigned MSI as GitHub artifact
+        id: upload-msi
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: setup/T3000-setup.msi
+
+      - name: Sign MSI installer with SignPath
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+          organization-id: '${{ secrets.SIGNPATH_ORGANIZATION_ID }}'
+          project-slug: '${{ secrets.SIGNPATH_PROJECT_SLUG }}'
+          signing-policy-slug: '${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}'
+          artifact-configuration-slug: 'Sign-MSI'
+          github-artifact-id: '${{ steps.upload-msi.outputs.artifact-id }}'
+          wait-for-completion: true
+          output-artifact-directory: 'signed-installer'
+          github-token: '${{ secrets.GITHUB_TOKEN }}'
+
+      - name: Move signed MSI back to setup directory
         shell: pwsh
         run: |
-          $file = Get-Item "setup/T3000-setup.msi"
-          Write-Host "Signing MSI installer: $($file.Name)"
-          Write-Host "  File size: $([math]::Round($file.Length / 1MB, 2)) MB"
-          Write-Host "  File path: $($file.FullName)"
-          Write-Host ""
-
-          # Validate MSI file
-          if ($file.Length -eq 0) {
-            Write-Error "MSI file is empty (0 bytes)"
-            exit 1
-          }
-          if ($file.Length -gt 100MB) {
-            Write-Warning "MSI file is very large: $([math]::Round($file.Length / 1MB, 2)) MB"
-          }
-
-          # Submit to SignPath
-          try {
-            $response = Invoke-RestMethod `
-              -Uri "https://app.signpath.io/API/v1/${{ secrets.SIGNPATH_ORGANIZATION_ID }}/SigningRequests" `
-              -Method POST `
-              -Headers @{ "Authorization" = "Bearer ${{ secrets.SIGNPATH_API_TOKEN }}" } `
-              -Form @{
-                "Artifact" = $file
-                "ProjectSlug" = "${{ secrets.SIGNPATH_PROJECT_SLUG }}"
-                "SigningPolicySlug" = "${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}"
-                "ArtifactConfigurationSlug" = "Sign-MSI"
-              }
-
-            $signingRequestId = $response.SigningRequestId
-            Write-Host "  Request ID: $signingRequestId"
-            Write-Host "  Submitted at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-          } catch {
-            Write-Error "Failed to submit MSI signing request"
-            Write-Host ""
-            Write-Host "Error: $_"
-            if ($_.Exception.Response) {
-              Write-Host "Response Status: $($_.Exception.Response.StatusCode)"
-              Write-Host "Response StatusDescription: $($_.Exception.Response.StatusDescription)"
-              try {
-                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-                $responseBody = $reader.ReadToEnd()
-                Write-Host "Response Body: $responseBody"
-              } catch {
-                Write-Host "Could not read response body"
-              }
-            }
-            exit 1
-          }
-
-          # Wait for signing to complete (max 10 minutes)
-          $maxWaitSeconds = 600
-          $elapsedSeconds = 0
-          $lastStatus = ""
-
-          do {
-            Start-Sleep -Seconds 10
-            $elapsedSeconds += 10
-
-            try {
-              $status = Invoke-RestMethod `
-                -Uri "https://app.signpath.io/API/v1/${{ secrets.SIGNPATH_ORGANIZATION_ID }}/SigningRequests/$signingRequestId" `
-                -Headers @{ "Authorization" = "Bearer ${{ secrets.SIGNPATH_API_TOKEN }}" }
-
-              # Only log status changes to reduce noise
-              if ($status.Status -ne $lastStatus) {
-                Write-Host "  Status: $($status.Status) ($($elapsedSeconds)s elapsed)"
-                $lastStatus = $status.Status
-              }
-
-              # Show detailed error information
-              if ($status.ErrorMessage) {
-                Write-Host "  ⚠️  ErrorMessage: $($status.ErrorMessage)"
-              }
-              if ($status.Description) {
-                Write-Host "  Description: $($status.Description)"
-              }
-              if ($status.WorkflowStatus) {
-                Write-Host "  WorkflowStatus: $($status.WorkflowStatus)"
-              }
-            } catch {
-              Write-Error "Failed to check MSI signing status: $_"
-              exit 1
-            }
-
-            if ($elapsedSeconds -ge $maxWaitSeconds) {
-              Write-Error "Timeout waiting for MSI signing to complete (10 minutes)"
-              exit 1
-            }
-          } while ($status.Status -eq "Processing" -or $status.Status -eq "Submitted" -or $status.Status -eq "InProgress")
-
-          if ($status.Status -eq "Completed") {
-            # Download signed file
-            try {
-              Invoke-RestMethod `
-                -Uri "https://app.signpath.io/API/v1/${{ secrets.SIGNPATH_ORGANIZATION_ID }}/SigningRequests/$signingRequestId/SignedArtifact" `
-                -Headers @{ "Authorization" = "Bearer ${{ secrets.SIGNPATH_API_TOKEN }}" } `
-                -OutFile "setup/T3000-setup.msi"
-              Write-Host "  ✓ Successfully signed MSI installer"
-              Write-Host ""
-            } catch {
-              Write-Error "Failed to download signed MSI: $_"
-              exit 1
-            }
-          } else {
-            Write-Error "MSI signing FAILED with status: $($status.Status)"
-            Write-Host ""
-            Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            Write-Host "SIGNPATH ERROR DETAILS:"
-            Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            Write-Host ""
-            if ($status.ErrorMessage) {
-              Write-Host "ErrorMessage: $($status.ErrorMessage)"
-            }
-            if ($status.Description) {
-              Write-Host "Description: $($status.Description)"
-            }
-            if ($status.WorkflowStatus) {
-              Write-Host "WorkflowStatus: $($status.WorkflowStatus)"
-            }
-            if ($status.IsFinalStatus) {
-              Write-Host "IsFinalStatus: $($status.IsFinalStatus)"
-            }
-            Write-Host ""
-            Write-Host "Full status response (JSON):"
-            Write-Host ($status | ConvertTo-Json -Depth 10)
-            Write-Host ""
-            Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            exit 1
-          }
+          $msi = Get-ChildItem "signed-installer" -Recurse -Filter "*.msi" | Select-Object -First 1
+          if (-not $msi) { Write-Error "Signed MSI not found in signed-installer/"; exit 1 }
+          Copy-Item $msi.FullName "setup\T3000-setup.msi" -Force
+          Write-Host "Signed MSI restored: $($msi.FullName)"
 
       - name: Upload the signed installer to artifacts
         uses: actions/upload-artifact@v4
