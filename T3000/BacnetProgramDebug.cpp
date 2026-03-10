@@ -498,13 +498,13 @@ int CBacnetProgramDebug::Fresh_Program_List(unsigned int list_type)
 			}
 			else if (bacnet_device_type == T3_ESP_RMC)
 			{
-				digital_special_output_count = NG2_OUT_D;
-				analog_special_output_count = NG2_OUT_A;
+				digital_special_output_count = RMC_OUT_D;
+				analog_special_output_count = RMC_OUT_A;
 			}
-			else if (bacnet_device_type == T3_NG2_TYPE2)
+			else if (bacnet_device_type == T3_NG3)
 			{
-				digital_special_output_count = NG2_TYPE2_OUT_D;
-				analog_special_output_count = NG2_TYPE2_OUT_A;
+				digital_special_output_count = NG3_OUT_D;
+				analog_special_output_count = NG3_OUT_A;
 			}
 			else if (bacnet_device_type == T3_3IIC)
 			{

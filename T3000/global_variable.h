@@ -1966,7 +1966,7 @@ Str_array_point s_Array_data;
 Str_weekly_routine_point s_Weekly_data[8] = {0};
 Str_annual_routine_point s_Annual_data[4] = {0};
 Control_group_point s_screen_data[16];
-Str_monitor_point s_monitor_data;
+Str_monitor_point s_monitor_data[12] = {0};
 Str_t3_screen_Json s_json_screen_data;
 Str_item_Json s_json_item_data[BAC_GRPHIC_JSON_ITEM_COUNT]; //缓存其他panel json item 值的 全局变量;
 str_webview_logging_time g_logging_time[256] = {0};

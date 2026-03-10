@@ -12,6 +12,7 @@
 #include "BacnetVarCusRang.h"
 #include "Bacnet_Range_Msv.h"
 #include "MainFrm.h"
+extern bool enable_all_output_analog_range;
 CBacnetAnalogCusRang * bac_analog_window = NULL;
 static int temp_static_value = 0;
 int old_bac_range_number_choose = 0;
@@ -581,7 +582,6 @@ void BacnetRange::Initial_static()
 	{
 		m_show_unit.ShowWindow(TRUE);
 
-
 		if(bac_ranges_type == OUTPUT_RANGE_ANALOG_TYPE)
 		{
 			if((bac_ranges_type>0) && (bac_ranges_type <=5))
@@ -728,6 +728,42 @@ void BacnetRange::Initial_static()
 
 		// Fandu 2021 09 06 All T3 series and extension series do not support 4-20ma current output
 		GetDlgItem(IDC_RADIO53)->EnableWindow(false); //Fandu 2021 09 06 所有的T3系列 以及扩展系列都不支持 4-20ma 电流输出;
+
+		//if(Device_Basic_Setting.reg.panel_number)
+		if (g_selected_product_id == PM_ESP32_T3_SERIES)
+		{
+			if (enable_all_output_analog_range == false)
+			{
+				for (int i = IDC_RADIO47; i <= IDC_RADIO53; i++)	//Output analog
+				{
+					GetDlgItem(i)->EnableWindow(false);
+				}
+				GetDlgItem(IDC_RADIO_NEW200)->EnableWindow(true);
+				GetDlgItem(IDC_RADIO_NEW201)->EnableWindow(false);
+
+				for (int i = IDC_RADIO_MSV_1; i <= IDC_RADIO_MSV_4; i++)
+				{
+					((CButton*)GetDlgItem(i))->EnableWindow(false);
+				}
+				((CButton*)GetDlgItem(IDC_BTN_EDIT_MSV_RANGE))->EnableWindow(false);
+			}
+			else
+			{
+				for (int i = IDC_RADIO47; i <= IDC_RADIO53; i++)	//Output analog
+				{
+					GetDlgItem(i)->EnableWindow(true);
+				}
+				GetDlgItem(IDC_RADIO_NEW200)->EnableWindow(true);
+				GetDlgItem(IDC_RADIO_NEW201)->EnableWindow(true);
+				for (int i = IDC_RADIO_MSV_1; i <= IDC_RADIO_MSV_4; i++)
+				{
+					((CButton*)GetDlgItem(i))->EnableWindow(true);
+				}
+				((CButton*)GetDlgItem(IDC_BTN_EDIT_MSV_RANGE))->EnableWindow(true);
+			}
+		}
+
+
 	}
 	else if((bac_ranges_type == INPUT_RANGE_ANALOG_TYPE) || (initial_dialog == 2))
 	{

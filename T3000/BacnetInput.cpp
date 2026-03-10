@@ -280,17 +280,17 @@ void CBacnetInput::Reload_Unit_Type()
 	}
 	else if (bacnet_device_type == T3_ESP_RMC)
 	{
-		if (NG2_IN_A > (int)m_Input_data.size())
+		if (RMC_IN_A > (int)m_Input_data.size())
 			initial_count = (int)m_Input_data.size();
 		else
-			initial_count = NG2_IN_A;
+			initial_count = RMC_IN_A;
 	}
-	else if (bacnet_device_type == T3_NG2_TYPE2)
+	else if (bacnet_device_type == T3_NG3)
 	{
-		if (NG2_TYPE2_IN_A > (int)m_Input_data.size())
+		if (NG3_IN_A > (int)m_Input_data.size())
 			initial_count = (int)m_Input_data.size();
 		else
-			initial_count = NG2_TYPE2_IN_A;
+			initial_count = NG3_IN_A;
 	}
 	else if (bacnet_device_type == T3_3IIC)
 	{
@@ -1651,7 +1651,7 @@ void CBacnetInput::OnNMClickList1(NMHDR *pNMHDR, LRESULT *pResult)
 				if ((lRow >= 16) && (lRow <= 17))  //IN17  IN18 is sensor
 					return;
 			}
-			else if (Device_Basic_Setting.reg.mini_type == T3_NG2_TYPE2)
+			else if (Device_Basic_Setting.reg.mini_type == T3_NG3)
 			{
 				if ((lRow >= 24) && (lRow <= 29))  //IN25  IN30 这些range是固定的传感器，不可更改
 					return;

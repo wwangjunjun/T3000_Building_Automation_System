@@ -1058,7 +1058,7 @@ extern Str_array_point s_Array_data;
 extern Str_weekly_routine_point s_Weekly_data[8];
 extern Str_annual_routine_point s_Annual_data[4];
 extern Control_group_point s_screen_data[16];
-extern Str_monitor_point s_monitor_data;
+extern Str_monitor_point s_monitor_data[12];
 extern Str_t3_screen_Json s_json_screen_data;
 extern str_webview_logging_time g_logging_time[256];
 extern Str_item_Json s_json_item_data[BAC_GRPHIC_JSON_ITEM_COUNT]; //缓存其他panel json item 值的 全局变量;

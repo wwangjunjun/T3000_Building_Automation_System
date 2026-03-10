@@ -3344,7 +3344,10 @@ void CDialogCM5_BacNet::Fresh()
     temp_serial.Format(_T("%d.prog"), g_selected_serialnumber);
     achive_file_path = g_achive_folder + _T("\\") + temp_serial;
 	CheckDeviceCountTable(g_selected_serialnumber, selected_product_Node.object_instance);
+	Str_Setting_Info TempSetting;
+	memcpy(&TempSetting, &Device_Basic_Setting, sizeof(Str_Setting_Info));
     load_prg_cache_ret = LoadBacnetBinaryFile(false, achive_file_path);
+	memcpy( &Device_Basic_Setting, &TempSetting, sizeof(Str_Setting_Info));
 
 	g_trendlog_ini_path = g_achive_folder_temp_db;
 	CString cs_serial_number;
@@ -3804,8 +3807,8 @@ void CDialogCM5_BacNet::Fresh()
 					bacnet_device_type = T3_FAN_MODULE;
 				else if (ret == T3_ESP_RMC)
 					bacnet_device_type = T3_ESP_RMC;
-				else if (ret == T3_NG2_TYPE2)
-					bacnet_device_type = T3_NG2_TYPE2;
+				else if (ret == T3_NG3)
+					bacnet_device_type = T3_NG3;
 				else if (ret == T3_3IIC)
 					bacnet_device_type = T3_3IIC;
 				else
@@ -6242,11 +6245,18 @@ void	CDialogCM5_BacNet::Initial_Some_UI(int ntype)
 			//重新加载 input output  variable  esp32 的3个是动态设置变化的;
 			ReInital_Someof_Point();
 			last_inital_point = 2; // 最后一次是esp 的count
+			Str_Setting_Info TempSetting;
+			memcpy(&TempSetting, &Device_Basic_Setting, sizeof(Str_Setting_Info));
+			load_prg_cache_ret = LoadBacnetBinaryFile(false, achive_file_path);
+			memcpy(&Device_Basic_Setting, &TempSetting, sizeof(Str_Setting_Info));
+
 		}
 		else
 		{
 			if (last_inital_point == 2)
 			{
+				Str_Setting_Info TempSetting;
+				memcpy(&TempSetting, &Device_Basic_Setting, sizeof(Str_Setting_Info));
 				last_inital_point = 1;
 				Initial_All_Point();
 				//input_item_limit_count = DYNAMIC_INPUT_ITEM_COUNT;
@@ -6255,7 +6265,23 @@ void	CDialogCM5_BacNet::Initial_Some_UI(int ntype)
 				((CBacnetOutput*)pDialog[WINDOW_OUTPUT])->Initial_List();
 				//variable_item_limit_count = DYNAMIC_VARIABLE_ITEM_COUNT;
 				((CBacnetVariable*)pDialog[WINDOW_VARIABLE])->Initial_List();
+
+				load_prg_cache_ret = LoadBacnetBinaryFile(false, achive_file_path);
+				memcpy(&Device_Basic_Setting, &TempSetting, sizeof(Str_Setting_Info));
 			}
+		}
+
+		if ((debug_item_show == DEBUG_SHOW_MESSAGE_THREAD) || (debug_item_show == DEBUG_SHOW_ALL))
+		{
+			CString temp_cs;
+			temp_cs.Format(_T("Select device : obj: %d,minitype : %d ,ip:%d.%d.%d.%d"),
+				Device_Basic_Setting.reg.object_instance,
+				Device_Basic_Setting.reg.mini_type,
+				Device_Basic_Setting.reg.ip_addr[0],
+				Device_Basic_Setting.reg.ip_addr[1],
+				Device_Basic_Setting.reg.ip_addr[2],
+				Device_Basic_Setting.reg.ip_addr[3]);
+			DFTrace(temp_cs);
 		}
 	}
 
@@ -7778,7 +7804,10 @@ DWORD WINAPI RS485_Connect_Thread(LPVOID lpvoid)
      if (g_protocol_support_ptp == PROTOCOL_MB_PTP_TRANSFER)
      {
          achive_file_path = g_achive_folder + _T("\\")  + str_serialid + _T(".prog");
-         load_prg_cache_ret = LoadBacnetBinaryFile(false, achive_file_path);
+		 Str_Setting_Info TempSetting;
+		 memcpy(&TempSetting, &Device_Basic_Setting, sizeof(Str_Setting_Info));
+		 load_prg_cache_ret = LoadBacnetBinaryFile(false, achive_file_path);
+		 memcpy(&Device_Basic_Setting, &TempSetting, sizeof(Str_Setting_Info));
          Sleep(1);
      }
      else

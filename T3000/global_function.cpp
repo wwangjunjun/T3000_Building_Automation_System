@@ -4901,7 +4901,7 @@ int Bacnet_PrivateData_Deal(char * bacnet_apud_point, uint32_t len_value_type, b
         {
             for (i = start_instance; i <= end_instance; i++)
             {
-                fill_in_trendlog(&s_monitor_data, my_temp_point);
+                fill_in_trendlog(&s_monitor_data[i], my_temp_point);
                 my_temp_point = my_temp_point + sizeof(Str_monitor_point);
             }
         }
@@ -11973,14 +11973,14 @@ void init_product_list()
     m_product_iocount.push_back(temp);
 
     temp.cs_name = _T("T3-NG2-TYPE2");
-    temp.ai_count = NG2_TYPE2_IN_A;
-    temp.bi_count = NG2_TYPE2_IN_D;
+    temp.ai_count = NG3_IN_A;
+    temp.bi_count = NG3_IN_D;
     temp.input_count = temp.ai_count + temp.bi_count;
-    temp.ao_count = NG2_TYPE2_OUT_A;
-    temp.bo_count = NG2_TYPE2_OUT_D;
+    temp.ao_count = NG3_OUT_A;
+    temp.bo_count = NG3_OUT_D;
     temp.output_count = temp.ao_count + temp.bo_count;
     temp.pid = 88;
-    temp.sub_pid = T3_NG2_TYPE2;
+    temp.sub_pid = T3_NG3;
     m_product_iocount.push_back(temp);
 
     temp.cs_name = _T("T3_3IIC");
@@ -11991,7 +11991,7 @@ void init_product_list()
     temp.bo_count = T3_3IIC_OUT_D;
     temp.output_count = temp.ao_count + temp.bo_count;
     temp.pid = 88;
-    temp.sub_pid = T3_NG2_TYPE2;
+    temp.sub_pid = T3_NG3;
     m_product_iocount.push_back(temp);
 
     temp.cs_name = _T("Tstat10");
@@ -17023,11 +17023,11 @@ int GetOutputType(UCHAR nproductid, UCHAR nproductsubid, UCHAR portindex) //èŽ·å
                 nret_type = OUTPUT_VIRTUAL_PORT;
         }
         break;
-        case T3_NG2_TYPE2:
+        case T3_NG3:
         {
-            if (portindex <= NG2_TYPE2_OUT_D)
+            if (portindex <= NG3_OUT_D)
                 nret_type = OUTPUT_DIGITAL_PORT;
-            else if (portindex <= NG2_TYPE2_OUT_D + NG2_TYPE2_OUT_A)
+            else if (portindex <= NG3_OUT_D + NG3_OUT_A)
                 nret_type = OUTPUT_ANALOG_PORT;
             else
                 nret_type = OUTPUT_VIRTUAL_PORT;
@@ -17262,9 +17262,9 @@ int GetInputType(UCHAR nproductid, UCHAR nproductsubid, UCHAR portindex, UCHAR n
                 nret_type = INPUT_VIRTUAL_PORT;
         }
         break;
-        case T3_NG2_TYPE2:
+        case T3_NG3:
         {
-            if (portindex <= NG2_TYPE2_IN_A)
+            if (portindex <= NG3_IN_A)
             {
                 nret_type = INPUT_ANALOG_PORT;
                 if (n_digital_analog == BAC_UNITS_DIGITAL)
