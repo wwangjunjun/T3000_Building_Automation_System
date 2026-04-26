@@ -50,7 +50,12 @@ jobs:
 
     - name: 还原 NuGet 包
       run: |
-        msbuild -restore "T3000 - VS2019.sln" /p:Configuration=${{ env.BUILD_TYPE }} /p:Platform=${{ env.PLATFORM }}
+        if (Test-Path "T3000 - VS2019.sln") {
+          msbuild -t:restore "T3000 - VS2019.sln"
+          echo "NuGet 包还原完成"
+        } else {
+          echo "未找到解决方案文件，跳过 NuGet 还原"
+        }
       shell: pwsh
 
     - name: 编译主程序
@@ -60,8 +65,7 @@ jobs:
           /p:Platform=${{ env.PLATFORM }} `
           /t:Rebuild `
           /m `
-          /v:minimal `
-          /logger:"GitHubActions,./tools/GitHubActionsLogger.dll"
+          /v:minimal
       shell: pwsh
 
     - name: 编译 C# 控件库
