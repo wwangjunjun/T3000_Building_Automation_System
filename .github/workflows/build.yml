@@ -49,10 +49,10 @@ jobs:
       shell: pwsh
 
     - name: 还原 NuGet 包
+      continue-on-error: true
       run: |
         if (Test-Path "T3000 - VS2019.sln") {
-          msbuild -t:restore "T3000 - VS2019.sln"
-          echo "NuGet 包还原完成"
+          nuget restore "T3000 - VS2019.sln" -Verbosity minimal
         } else {
           echo "未找到解决方案文件，跳过 NuGet 还原"
         }
@@ -65,7 +65,8 @@ jobs:
           /p:Platform=${{ env.PLATFORM }} `
           /t:Rebuild `
           /m `
-          /v:minimal
+          /v:minimal `
+          /p:RestorePackages=false
       shell: pwsh
 
     - name: 编译 C# 控件库
