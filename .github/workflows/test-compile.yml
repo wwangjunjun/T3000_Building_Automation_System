@@ -38,6 +38,11 @@ jobs:
       run: |
         cd build
         make -j$(nproc) 2>&1 | tee ../build-log.txt
+        if [ ${PIPESTATUS[0]} -ne 0 ]; then
+          echo "=== 编译失败，输出错误日志 ==="
+          cat ../build-log.txt
+          exit 1
+        fi
         echo "=== 编译完成 ==="
 
     - name: 上传编译日志
