@@ -1,10 +1,11 @@
 // AgentBridgeStandalone.cpp: 不依赖 MFC 的 AgentBridge 实现
 #include "AgentBridgeStandalone.h"
 #include <cstring>
-
-#ifdef _WIN32
-    #pragma comment(lib, "ws2_32")
-#endif
+#include <arpa/inet.h>
+#include <openssl/sha.h>
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+#include <openssl/buffer.h>
 
 // ============================================
 // HttpServer 实现
@@ -42,7 +43,12 @@ bool HttpServer::Start(int port, const std::string& bindAddr) {
 
 #ifdef _WIN32
     u_long mode = 1;
-    ioctlsocket(socket_, FIONBIO, &mode);
+    #ifdef _WIN32
+        ioctlsocket(socket_, FIONBIO, &mode);
+#else
+        int flags = fcntl(socket_, F_GETFL, 0);
+        fcntl(socket_, F_SETFL, flags | O_NONBLOCK);
+#endif;
 #else
     int flags = fcntl(socket_, F_GETFL, 0);
     fcntl(socket_, F_SETFL, flags | O_NONBLOCK);
@@ -439,7 +445,12 @@ bool McpServer::Start(int port, const std::string& bindAddr) {
 
 #ifdef _WIN32
     u_long mode = 1;
-    ioctlsocket(socket_, FIONBIO, &mode);
+    #ifdef _WIN32
+        ioctlsocket(socket_, FIONBIO, &mode);
+#else
+        int flags = fcntl(socket_, F_GETFL, 0);
+        fcntl(socket_, F_SETFL, flags | O_NONBLOCK);
+#endif;
 #else
     int flags = fcntl(socket_, F_GETFL, 0);
     fcntl(socket_, F_SETFL, flags | O_NONBLOCK);
