@@ -65,8 +65,10 @@ jobs:
           /p:Platform=${{ env.PLATFORM }} `
           /t:Rebuild `
           /m `
-          /v:minimal `
-          /p:RestorePackages=false
+          /v:detailed `
+          /p:RestorePackages=false `
+          /p:WindowsTargetPlatformVersion=10.0 `
+          /p:PlatformToolset=v143
       shell: pwsh
 
     - name: 编译 C# 控件库
