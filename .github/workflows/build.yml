@@ -105,16 +105,27 @@ jobs:
 
     - name: 编译 C# 控件库
       run: |
-        if (Test-Path "T3000Controls\T3000Controls.sln") {
-          msbuild T3000Controls\T3000Controls.sln `
+        if (Test-Path "T3000Controls\\T3000Controls.sln") {
+          msbuild T3000Controls\\T3000Controls.sln `
             /p:Configuration=${{ env.BUILD_TYPE }} `
             /t:Rebuild `
             /m `
-            /v:minimal
+            /v:minimal `
+            /fl `
+            /flp:logfile=csharp-build.log;verbosity=detailed
         } else {
           echo "未找到 C# 控件库解决方案，跳过"
         }
       shell: pwsh
+      continue-on-error: true
+
+    - name: 上传 C# 编译日志
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: csharp-build-log
+        path: csharp-build.log
+        retention-days: 7
 
     - name: 复制输出文件
       run: |
