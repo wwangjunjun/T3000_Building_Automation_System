@@ -15,10 +15,10 @@ jobs:
 
     - name: 安装依赖
       run: |
-        sudo apt-get update
-        sudo apt-get install -y cmake libssl-dev
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq cmake libssl-dev 2>&1 | tail -5
         echo "=== 安装完成 ==="
-        cmake --version
+        cmake --version | head -1
         openssl version
 
     - name: 列出文件
@@ -32,32 +32,36 @@ jobs:
       run: |
         mkdir -p build
         cd build
-        cmake ../AgentBridgeStandalone -DCMAKE_BUILD_TYPE=Release 2>&1
+        cmake ../AgentBridgeStandalone -DCMAKE_BUILD_TYPE=Release 2>&1 | tee ../cmake-log.txt
+        echo "=== CMake 配置完成 ==="
 
     - name: 编译
       run: |
         cd build
         make -j$(nproc) 2>&1 | tee ../build-log.txt
-        if [ ${PIPESTATUS[0]} -ne 0 ]; then
-          echo "=== 编译失败 ===" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat ../build-log.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "=== 编译失败，输出错误日志 ==="
-          cat ../build-log.txt
-          exit 1
-        fi
         echo "=== 编译完成 ==="
+
+    - name: 输出错误日志
+      if: failure()
+      run: |
+        echo "=== CMake 日志 ==="
+        cat cmake-log.txt 2>/dev/null || echo "无 CMake 日志"
+        echo ""
+        echo "=== 编译日志 ==="
+        cat build-log.txt 2>/dev/null || echo "无编译日志"
 
     - name: 上传编译日志
       if: failure()
       uses: actions/upload-artifact@v4
       with:
         name: build-log
-        path: build-log.txt
+        path: |
+          cmake-log.txt
+          build-log.txt
         retention-days: 7
 
     - name: 运行测试
+      if: success()
       run: |
         cd build
         ./AgentBridgeTest &
