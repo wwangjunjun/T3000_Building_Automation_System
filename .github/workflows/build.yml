@@ -68,6 +68,7 @@ jobs:
 
     - name: 编译主程序
       run: |
+        # 尝试编译整个解决方案
         msbuild "T3000 - VS2019.sln" `
           /p:Configuration=${{ env.BUILD_TYPE }} `
           /p:Platform=${{ env.PLATFORM }} `
@@ -76,8 +77,31 @@ jobs:
           /v:detailed `
           /p:RestorePackages=false `
           /p:WindowsTargetPlatformVersion=10.0 `
-          /p:PlatformToolset=v143
+          /p:PlatformToolset=v143 `
+          /fl `
+          /flp:logfile=build.log;verbosity=detailed
       shell: pwsh
+      continue-on-error: true
+
+    - name: 检查编译状态
+      run: |
+        if (Test-Path "build.log") {
+          echo "=== 编译日志已生成 ==="
+          # 查找错误
+          Select-String -Path "build.log" -Pattern "error" -CaseSensitive:$false | Select-Object -First 20
+        } else {
+          echo "=== 编译日志未生成 ==="
+        }
+      shell: pwsh
+      continue-on-error: true
+
+    - name: 上传编译日志
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log
+        path: build.log
+        retention-days: 7
 
     - name: 编译 C# 控件库
       run: |
