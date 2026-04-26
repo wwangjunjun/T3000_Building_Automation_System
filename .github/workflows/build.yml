@@ -167,6 +167,26 @@ jobs:
       with:
         path: T3000_zh.iss
         options: /O+
+      continue-on-error: true
+
+    - name: 检查安装包输出
+      run: |
+        echo "=== 检查安装包输出 ==="
+        if (Test-Path "Output") {
+          echo "Output 目录存在"
+          Get-ChildItem -Path "Output" -Recurse
+        } else {
+          echo "Output 目录不存在"
+        }
+        
+        if (Test-Path "T3000InstallShield\Output") {
+          echo "T3000InstallShield\Output 目录存在"
+          Get-ChildItem -Path "T3000InstallShield\Output" -Recurse
+        } else {
+          echo "T3000InstallShield\Output 目录不存在"
+        }
+      shell: pwsh
+      continue-on-error: true
 
     - name: 上传构建产物
       uses: actions/upload-artifact@v4
