@@ -39,6 +39,10 @@ jobs:
         cd build
         make -j$(nproc) 2>&1 | tee ../build-log.txt
         if [ ${PIPESTATUS[0]} -ne 0 ]; then
+          echo "=== 编译失败 ===" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat ../build-log.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
           echo "=== 编译失败，输出错误日志 ==="
           cat ../build-log.txt
           exit 1
