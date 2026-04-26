@@ -1,6 +1,10 @@
 name: 测试编译
 
 on:
+  push:
+    paths:
+      - '.github/workflows/test-compile.yml'
+      - 'AgentBridgeStandalone/**'
   workflow_dispatch:
 
 jobs:
