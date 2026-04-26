@@ -1,11 +1,6 @@
 // AgentBridgeStandalone.cpp: 不依赖 MFC 的 AgentBridge 实现
 #include "AgentBridgeStandalone.h"
 #include <cstring>
-#include <arpa/inet.h>
-#include <openssl/sha.h>
-#include <openssl/bio.h>
-#include <openssl/evp.h>
-#include <openssl/buffer.h>
 
 // ============================================
 // HttpServer 实现
@@ -43,12 +38,7 @@ bool HttpServer::Start(int port, const std::string& bindAddr) {
 
 #ifdef _WIN32
     u_long mode = 1;
-    #ifdef _WIN32
-        ioctlsocket(socket_, FIONBIO, &mode);
-#else
-        int flags = fcntl(socket_, F_GETFL, 0);
-        fcntl(socket_, F_SETFL, flags | O_NONBLOCK);
-#endif;
+    ioctlsocket(socket_, FIONBIO, &mode);
 #else
     int flags = fcntl(socket_, F_GETFL, 0);
     fcntl(socket_, F_SETFL, flags | O_NONBLOCK);
@@ -188,7 +178,27 @@ void HttpServer::RegisterCatchAll(Handler handler) {
 }
 
 // ============================================
-// WebSocketServer 实现
+// SHA1 辅助函数（兼容 OpenSSL 3.0+）
+// ============================================
+#ifndef _WIN32
+static bool ComputeSHA1(const unsigned char* data, size_t len, unsigned char* out) {
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    if (!ctx) return false;
+    
+    if (EVP_DigestInit_ex(ctx, EVP_sha1(), NULL) != 1 ||
+        EVP_DigestUpdate(ctx, data, len) != 1 ||
+        EVP_DigestFinal_ex(ctx, out, NULL) != 1) {
+        EVP_MD_CTX_free(ctx);
+        return false;
+    }
+    
+    EVP_MD_CTX_free(ctx);
+    return true;
+}
+#endif
+
+// ============================================
+// WebSocket 实现
 // ============================================
 bool WebSocketServer::Start(int port, const std::string& bindAddr) {
     port_ = port;
@@ -308,7 +318,11 @@ void WebSocketServer::HandleClient(SOCKET client, const std::string& ip, int por
     memset(sha1, 0, 20);
 #else
     unsigned char sha1[20];
-    SHA1((const unsigned char*)acceptInput.c_str(), acceptInput.size(), sha1);
+    if (!ComputeSHA1((const unsigned char*)acceptInput.c_str(), acceptInput.size(), sha1)) {
+        send(client, "HTTP/1.1 500 Internal Server Error\r\n\r\n", 37, 0);
+        closesocket(client);
+        return;
+    }
 #endif
 
     // Base64 编码
@@ -445,12 +459,7 @@ bool McpServer::Start(int port, const std::string& bindAddr) {
 
 #ifdef _WIN32
     u_long mode = 1;
-    #ifdef _WIN32
-        ioctlsocket(socket_, FIONBIO, &mode);
-#else
-        int flags = fcntl(socket_, F_GETFL, 0);
-        fcntl(socket_, F_SETFL, flags | O_NONBLOCK);
-#endif;
+    ioctlsocket(socket_, FIONBIO, &mode);
 #else
     int flags = fcntl(socket_, F_GETFL, 0);
     fcntl(socket_, F_SETFL, flags | O_NONBLOCK);
