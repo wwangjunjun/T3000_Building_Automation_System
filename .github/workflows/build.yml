@@ -204,6 +204,7 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
+          *.exe
           Output/*.exe
           T3000InstallShield/Output/*.exe
         draft: false
