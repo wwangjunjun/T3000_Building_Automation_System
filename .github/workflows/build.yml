@@ -46,6 +46,14 @@ jobs:
         # 安装 MFC 组件
         & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -find VC\Tools\MSBuild\*\Bin\MSBuild.exe
         echo "VS 已安装，MFC 组件应已包含"
+        
+        # 检查 MFC 是否可用
+        $mfcPath = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\*\atlmfc"
+        if (Test-Path $mfcPath) {
+          echo "MFC 组件已找到"
+        } else {
+          echo "警告: MFC 组件可能未安装"
+        }
       shell: pwsh
 
     - name: 还原 NuGet 包
