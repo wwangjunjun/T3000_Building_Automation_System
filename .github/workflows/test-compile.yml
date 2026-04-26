@@ -1,0 +1,45 @@
+name: 测试编译
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-compile:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: 安装依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake libssl-dev
+        echo "=== 安装完成 ==="
+        cmake --version
+        openssl version
+
+    - name: 列出文件
+      run: |
+        echo "=== AgentBridgeStandalone 目录 ==="
+        ls -la AgentBridgeStandalone/
+        echo "=== CMakeLists.txt 内容 ==="
+        cat AgentBridgeStandalone/CMakeLists.txt
+
+    - name: 配置 CMake
+      run: |
+        mkdir -p build
+        cd build
+        cmake ../AgentBridgeStandalone -DCMAKE_BUILD_TYPE=Release 2>&1
+
+    - name: 编译
+      run: |
+        cd build
+        make -j$(nproc) 2>&1
+
+    - name: 运行测试
+      run: |
+        cd build
+        ./AgentBridgeTest &
+        sleep 2
+        curl -s http://localhost:8080/ || echo "HTTP 测试失败"
+        curl -s http://localhost:8080/api/v1/system/info || echo "系统信息测试失败"
+        kill %1 2>/dev/null || true
