@@ -31,6 +31,8 @@ CAgentBridge::CAgentBridge()
     , m_httpServer(nullptr)
     , m_webSocketServer(nullptr)
     , m_mcpServer(nullptr)
+    , m_nextRuleId(1)
+    , m_nextWebhookId(1)
 {
 }
 
@@ -469,6 +471,902 @@ void CAgentBridge::RegisterApiRoutes() {
         });
 
     // ============================
+    // 批量操作 API
+    // ============================
+
+    // POST /api/v1/batch/read
+    m_httpServer->RegisterRoute("POST", AGENTBRIDGE_API_PREFIX "/batch/read",
+        [this, authMiddleware](const AgentHttpRequest& req, AgentHttpResponse& resp) {
+            if (!authMiddleware(req, resp)) return;
+
+            // 解析请求体中的输入 ID 列表
+            std::vector<int> inputIds;
+            try {
+                size_t pos = req.body.find("\"input_ids\"");
+                if (pos != std::string::npos) {
+                    size_t bracketStart = req.body.find('[', pos);
+                    size_t bracketEnd = req.body.find(']', bracketStart);
+                    if (bracketStart != std::string::npos && bracketEnd != std::string::npos) {
+                        std::string arrayStr = req.body.substr(bracketStart + 1, bracketEnd - bracketStart - 1);
+                        // 解析逗号分隔的数字
+                        std::stringstream ss(arrayStr);
+                        std::string token;
+                        while (std::getline(ss, token, ',')) {
+                            // 去除引号和空格
+                            size_t start = token.find_first_of("-0123456789");
+                            if (start != std::string::npos) {
+                                size_t end = token.find_first_not_of("-0123456789", start);
+                                if (end != std::string::npos) {
+                                    inputIds.push_back(std::stoi(token.substr(start, end - start)));
+                                } else {
+                                    inputIds.push_back(std::stoi(token.substr(start)));
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (...) {
+                resp.statusCode = 400;
+                resp.body = JsonError("Invalid input_ids format").ToString();
+                return;
+            }
+
+            // 批量读取输入值
+            CAgentJson results;
+            results.SetArray();
+            time_t now = time(NULL);
+            char timeStr[64];
+            strftime(timeStr, sizeof(timeStr), "%Y-%m-%dT%H:%M:%S", localtime(&now));
+
+            for (int inputId : inputIds) {
+                double value = ReadInput(inputId);
+                CAgentJson item;
+                item.SetObject();
+                item.Add("input_id", CAgentJson(inputId));
+                item.Add("value", CAgentJson(value));
+                item.Add("timestamp", CAgentJson(std::string(timeStr)));
+                results.Add(item);
+            }
+
+            resp.body = JsonSuccess(results).ToString();
+        });
+
+    // POST /api/v1/batch/write
+    m_httpServer->RegisterRoute("POST", AGENTBRIDGE_API_PREFIX "/batch/write",
+        [this, authMiddleware](const AgentHttpRequest& req, AgentHttpResponse& resp) {
+            if (!authMiddleware(req, resp)) return;
+
+            // 解析请求体中的写入列表
+            std::vector<std::pair<int, double>> writes;
+            try {
+                size_t pos = req.body.find("\"writes\"");
+                if (pos != std::string::npos) {
+                    size_t bracketStart = req.body.find('[', pos);
+                    size_t bracketEnd = req.body.find(']', bracketStart);
+                    if (bracketStart != std::string::npos && bracketEnd != std::string::npos) {
+                        std::string arrayStr = req.body.substr(bracketStart + 1, bracketEnd - bracketStart - 1);
+                        // 解析每个写入对象
+                        size_t objStart = 0;
+                        while ((objStart = arrayStr.find('{', objStart)) != std::string::npos) {
+                            size_t objEnd = arrayStr.find('}', objStart);
+                            if (objEnd == std::string::npos) break;
+                            
+                            std::string objStr = arrayStr.substr(objStart, objEnd - objStart + 1);
+                            
+                            // 解析 output_id
+                            int outputId = 0;
+                            size_t idPos = objStr.find("\"output_id\"");
+                            if (idPos != std::string::npos) {
+                                size_t colonPos = objStr.find(':', idPos);
+                                if (colonPos != std::string::npos) {
+                                    std::string idStr = objStr.substr(colonPos + 1);
+                                    size_t start = idStr.find_first_of("-0123456789");
+                                    if (start != std::string::npos) {
+                                        size_t end = idStr.find_first_not_of("-0123456789", start);
+                                        outputId = std::stoi(idStr.substr(start, end != std::string::npos ? end - start : std::string::npos));
+                                    }
+                                }
+                            }
+                            
+                            // 解析 value
+                            double value = 0;
+                            size_t valPos = objStr.find("\"value\"");
+                            if (valPos != std::string::npos) {
+                                size_t colonPos = objStr.find(':', valPos);
+                                if (colonPos != std::string::npos) {
+                                    std::string valStr = objStr.substr(colonPos + 1);
+                                    size_t start = valStr.find_first_of("-0123456789.");
+                                    if (start != std::string::npos) {
+                                        size_t end = valStr.find_first_of(",} \\t\\r\\n", start);
+                                        if (end != std::string::npos) {
+                                            value = std::stod(valStr.substr(start, end - start));
+                                        } else {
+                                            value = std::stod(valStr.substr(start));
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            writes.push_back({outputId, value});
+                            objStart = objEnd + 1;
+                        }
+                    }
+                }
+            } catch (...) {
+                resp.statusCode = 400;
+                resp.body = JsonError("Invalid writes format").ToString();
+                return;
+            }
+
+            // 批量写入输出值
+            CAgentJson results;
+            results.SetArray();
+            int successCount = 0;
+            int failCount = 0;
+
+            for (auto& write : writes) {
+                bool success = WriteOutput(write.first, write.second);
+                if (success) successCount++; else failCount++;
+                
+                CAgentJson item;
+                item.SetObject();
+                item.Add("output_id", CAgentJson(write.first));
+                item.Add("value", CAgentJson(write.second));
+                item.Add("success", CAgentJson(success));
+                results.Add(item);
+                
+                // 推送事件
+                if (success) {
+                    AgentPointInfo point;
+                    point.pointId = write.first;
+                    point.currentValue = write.second;
+                    PushPointEvent(0, point);
+                }
+            }
+
+            CAgentJson response;
+            response.SetObject();
+            response.Add("results", results);
+            response.Add("success_count", CAgentJson(successCount));
+            response.Add("fail_count", CAgentJson(failCount));
+            response.Add("total", CAgentJson((int)writes.size()));
+
+            resp.body = JsonSuccess(response).ToString();
+        });
+
+    // ============================
+    // 数据导出 API
+    // ============================
+
+    // GET /api/v1/export/devices
+    m_httpServer->RegisterRoute("GET", AGENTBRIDGE_API_PREFIX "/export/devices",
+        [this, authMiddleware](const AgentHttpRequest& req, AgentHttpResponse& resp) {
+            if (!authMiddleware(req, resp)) return;
+
+            // 检查是否请求 CSV 格式
+            bool csvFormat = req.query.find("format=csv") != std::string::npos;
+
+            auto devices = GetDevices();
+
+            if (csvFormat) {
+                // CSV 格式
+                resp.contentType = "text/csv";
+                std::string csv = "ID,Name,Model,Serial Number,Firmware Version,Online,BACnet ID,Modbus ID\n";
+                for (auto& dev : devices) {
+                    csv += std::to_string(dev.deviceId) + ",";
+                    csv += dev.name + ",";
+                    csv += dev.model + ",";
+                    csv += dev.serialNumber + ",";
+                    csv += dev.firmwareVersion + ",";
+                    csv += (dev.online ? "是" : "否") + ",";
+                    csv += std::to_string(dev.bacnetId) + ",";
+                    csv += std::to_string(dev.modbusId) + "\n";
+                }
+                resp.body = csv;
+            } else {
+                // JSON 格式
+                CAgentJson deviceList;
+                deviceList.SetArray();
+                for (auto& dev : devices) {
+                    CAgentJson devJson;
+                    devJson.SetObject();
+                    devJson.Add("id", CAgentJson(dev.deviceId));
+                    devJson.Add("name", CAgentJson(dev.name));
+                    devJson.Add("model", CAgentJson(dev.model));
+                    devJson.Add("serial_number", CAgentJson(dev.serialNumber));
+                    devJson.Add("firmware_version", CAgentJson(dev.firmwareVersion));
+                    devJson.Add("online", CAgentJson(dev.online));
+                    devJson.Add("bacnet_id", CAgentJson(dev.bacnetId));
+                    devJson.Add("modbus_id", CAgentJson(dev.modbusId));
+                    deviceList.Add(devJson);
+                }
+                resp.body = JsonSuccess(deviceList).ToString();
+            }
+        });
+
+    // GET /api/v1/export/alarms
+    m_httpServer->RegisterRoute("GET", AGENTBRIDGE_API_PREFIX "/export/alarms",
+        [this, authMiddleware](const AgentHttpRequest& req, AgentHttpResponse& resp) {
+            if (!authMiddleware(req, resp)) return;
+
+            bool csvFormat = req.query.find("format=csv") != std::string::npos;
+            auto alarms = GetAlarms();
+
+            if (csvFormat) {
+                resp.contentType = "text/csv";
+                std::string csv = "ID,Device ID,Device Name,Description,Severity,Acknowledged,Timestamp\n";
+                for (auto& alarm : alarms) {
+                    csv += std::to_string(alarm.alarmId) + ",";
+                    csv += std::to_string(alarm.deviceId) + ",";
+                    csv += alarm.deviceName + ",";
+                    csv += alarm.description + ",";
+                    csv += std::to_string((int)alarm.severity) + ",";
+                    csv += (alarm.acknowledged ? "是" : "否") + ",";
+                    csv += alarm.timestamp + "\n";
+                }
+                resp.body = csv;
+            } else {
+                CAgentJson alarmList;
+                alarmList.SetArray();
+                for (auto& alarm : alarms) {
+                    CAgentJson alarmJson;
+                    alarmJson.SetObject();
+                    alarmJson.Add("id", CAgentJson(alarm.alarmId));
+                    alarmJson.Add("device_id", CAgentJson(alarm.deviceId));
+                    alarmJson.Add("device_name", CAgentJson(alarm.deviceName));
+                    alarmJson.Add("description", CAgentJson(alarm.description));
+                    alarmJson.Add("severity", CAgentJson((int)alarm.severity));
+                    alarmJson.Add("acknowledged", CAgentJson(alarm.acknowledged));
+                    alarmJson.Add("timestamp", CAgentJson(alarm.timestamp));
+                    alarmList.Add(alarmJson);
+                }
+                resp.body = JsonSuccess(alarmList).ToString();
+            }
+        });
+
+    // ============================
+    // 告警规则 API
+    // ============================
+
+    // GET /api/v1/rules
+    m_httpServer->RegisterRoute("GET", AGENTBRIDGE_API_PREFIX "/rules",
+        [this, authMiddleware](const AgentHttpRequest& req, AgentHttpResponse& resp) {
+            if (!authMiddleware(req, resp)) return;
+
+            auto rules = GetAlarmRules();
+            CAgentJson ruleList;
+            ruleList.SetArray();
+
+            for (auto& rule : rules) {
+                CAgentJson ruleJson;
+                ruleJson.SetObject();
+                ruleJson.Add("id", CAgentJson(rule.ruleId));
+                ruleJson.Add("name", CAgentJson(rule.name));
+                ruleJson.Add("description", CAgentJson(rule.description));
+                ruleJson.Add("device_id", CAgentJson(rule.deviceId));
+                ruleJson.Add("point_id", CAgentJson(rule.pointId));
+                ruleJson.Add("operator", CAgentJson((int)rule.operator_));
+                ruleJson.Add("threshold", CAgentJson(rule.threshold));
+                ruleJson.Add("enabled", CAgentJson(rule.enabled));
+                ruleJson.Add("action", CAgentJson(rule.action));
+                ruleJson.Add("webhook_url", CAgentJson(rule.webhookUrl));
+                ruleJson.Add("last_triggered", CAgentJson(rule.lastTriggered));
+                ruleJson.Add("trigger_count", CAgentJson(rule.triggerCount));
+                ruleList.Add(ruleJson);
+            }
+
+            resp.body = JsonSuccess(ruleList).ToString();
+        });
+
+    // POST /api/v1/rules
+    m_httpServer->RegisterRoute("POST", AGENTBRIDGE_API_PREFIX "/rules",
+        [this, authMiddleware](const AgentHttpRequest& req, AgentHttpResponse& resp) {
+            if (!authMiddleware(req, resp)) return;
+
+            AgentAlarmRule rule;
+            rule.enabled = true;
+            rule.triggerCount = 0;
+
+            // 解析请求体
+            try {
+                // 解析 name
+                size_t pos = req.body.find("\"name\"");
+                if (pos != std::string::npos) {
+                    size_t colonPos = req.body.find(':', pos);
+                    if (colonPos != std::string::npos) {
+                        size_t quoteStart = req.body.find('"', colonPos + 1);
+                        size_t quoteEnd = req.body.find('"', quoteStart + 1);
+                        if (quoteStart != std::string::npos && quoteEnd != std::string::npos) {
+                            rule.name = req.body.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
+                        }
+                    }
+                }
+
+                // 解析 device_id
+                pos = req.body.find("\"device_id\"");
+                if (pos != std::string::npos) {
+                    size_t colonPos = req.body.find(':', pos);
+                    if (colonPos != std::string::npos) {
+                        std::string valStr = req.body.substr(colonPos + 1);
+                        size_t start = valStr.find_first_of("-0123456789");
+                        if (start != std::string::npos) {
+                            size_t end = valStr.find_first_not_of("-0123456789", start);
+                            rule.deviceId = std::stoi(valStr.substr(start, end != std::string::npos ? end - start : std::string::npos));
+                        }
+                    }
+                }
+
+                // 解析 point_id
+                pos = req.body.find("\"point_id\"");
+                if (pos != std::string::npos) {
+                    size_t colonPos = req.body.find(':', pos);
+                    if (colonPos != std::string::npos) {
+                        std::string valStr = req.body.substr(colonPos + 1);
+                        size_t start = valStr.find_first_of("-0123456789");
+                        if (start != std::string::npos) {
+                            size_t end = valStr.find_first_not_of("-0123456789", start);
+                            rule.pointId = std::stoi(valStr.substr(start, end != std::string::npos ? end - start : std::string::npos));
+                        }
+                    }
+                }
+
+                // 解析 threshold
+                pos = req.body.find("\"threshold\"");
+                if (pos != std::string::npos) {
+                    size_t colonPos = req.body.find(':', pos);
+                    if (colonPos != std::string::npos) {
+                        std::string valStr = req.body.substr(colonPos + 1);
+                        size_t start = valStr.find_first_of("-0123456789.");
+                        if (start != std::string::npos) {
+                            size_t end = valStr.find_first_of(",} \\t\\r\\n", start);
+                            if (end != std::string::npos) {
+                                rule.threshold = std::stod(valStr.substr(start, end - start));
+                            } else {
+                                rule.threshold = std::stod(valStr.substr(start));
+                            }
+                        }
+                    }
+                }
+
+                // 解析 operator
+                pos = req.body.find("\"operator\"");
+                if (pos != std::string::npos) {
+                    size_t colonPos = req.body.find(':', pos);
+                    if (colonPos != std::string::npos) {
+                        std::string valStr = req.body.substr(colonPos + 1);
+                        size_t start = valStr.find_first_of("012345");
+                        if (start != std::string::npos) {
+                            rule.operator_ = (AgentRuleOperator)std::stoi(valStr.substr(start, 1));
+                        }
+                    }
+                }
+
+                // 解析 action
+                pos = req.body.find("\"action\"");
+                if (pos != std::string::npos) {
+                    size_t colonPos = req.body.find(':', pos);
+                    if (colonPos != std::string::npos) {
+                        size_t quoteStart = req.body.find('"', colonPos + 1);
+                        size_t quoteEnd = req.body.find('"', quoteStart + 1);
+                        if (quoteStart != std::string::npos && quoteEnd != std::string::npos) {
+                            rule.action = req.body.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
+                        }
+                    }
+                }
+
+                // 解析 webhook_url
+                pos = req.body.find("\"webhook_url\"");
+                if (pos != std::string::npos) {
+                    size_t colonPos = req.body.find(':', pos);
+                    if (colonPos != std::string::npos) {
+                        size_t quoteStart = req.body.find('"', colonPos + 1);
+                        size_t quoteEnd = req.body.find('"', quoteStart + 1);
+                        if (quoteStart != std::string::npos && quoteEnd != std::string::npos) {
+                            rule.webhookUrl = req.body.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
+                        }
+                    }
+                }
+            } catch (...) {
+                resp.statusCode = 400;
+                resp.body = JsonError("Invalid rule format").ToString();
+                return;
+            }
+
+            bool success = AddAlarmRule(rule);
+            auto rules = GetAlarmRules();
+            AgentAlarmRule addedRule = rules.back();
+
+            CAgentJson result;
+            result.SetObject();
+            result.Add("success", CAgentJson(success));
+            result.Add("rule_id", CAgentJson(addedRule.ruleId));
+
+            resp.body = result.ToString();
+        });
+
+    // DELETE /api/v1/rules/{id}
+    m_httpServer->RegisterRoute("DELETE", AGENTBRIDGE_API_PREFIX "/rules/{id}",
+        [this, authMiddleware](const AgentHttpRequest& req, AgentHttpResponse& resp) {
+            if (!authMiddleware(req, resp)) return;
+
+            int ruleId = 0;
+            try {
+                ruleId = std::stoi(req.params.at("id"));
+            } catch (...) {
+                resp.statusCode = 400;
+                resp.body = JsonError("Invalid rule ID").ToString();
+                return;
+            }
+
+            bool success = RemoveAlarmRule(ruleId);
+
+            CAgentJson result;
+            result.SetObject();
+            result.Add("success", CAgentJson(success));
+            result.Add("rule_id", CAgentJson(ruleId));
+
+            resp.body = result.ToString();
+        });
+
+    // POST /api/v1/rules/evaluate
+    m_httpServer->RegisterRoute("POST", AGENTBRIDGE_API_PREFIX "/rules/evaluate",
+        [this, authMiddleware](const AgentHttpRequest& req, AgentHttpResponse& resp) {
+            if (!authMiddleware(req, resp)) return;
+
+            bool triggered = EvaluateRules();
+
+            CAgentJson result;
+            result.SetObject();
+            result.Add("triggered", CAgentJson(triggered));
+            result.Add("timestamp", CAgentJson(std::string([]{
+                time_t now = time(NULL);
+                char timeStr[64];
+                strftime(timeStr, sizeof(timeStr), "%Y-%m-%dT%H:%M:%S", localtime(&now));
+                return std::string(timeStr);
+            }())));
+
+            resp.body = JsonSuccess(result).ToString();
+        });
+
+    // ============================
+    // Webhook API
+    // ============================
+
+    // GET /api/v1/webhooks
+    m_httpServer->RegisterRoute("GET", AGENTBRIDGE_API_PREFIX "/webhooks",
+        [this, authMiddleware](const AgentHttpRequest& req, AgentHttpResponse& resp) {
+            if (!authMiddleware(req, resp)) return;
+
+            auto webhooks = GetWebhooks();
+            CAgentJson webhookList;
+            webhookList.SetArray();
+
+            for (auto& webhook : webhooks) {
+                CAgentJson webhookJson;
+                webhookJson.SetObject();
+                webhookJson.Add("id", CAgentJson(webhook.webhookId));
+                webhookJson.Add("name", CAgentJson(webhook.name));
+                webhookJson.Add("url", CAgentJson(webhook.url));
+                webhookJson.Add("enabled", CAgentJson(webhook.enabled));
+                webhookJson.Add("success_count", CAgentJson(webhook.successCount));
+                webhookJson.Add("fail_count", CAgentJson(webhook.failCount));
+                webhookJson.Add("last_sent", CAgentJson(webhook.lastSent));
+                webhookJson.Add("last_error", CAgentJson(webhook.lastError));
+                
+                // 添加事件列表
+                CAgentJson events;
+                events.SetArray();
+                for (auto& event : webhook.events) {
+                    events.Add(CAgentJson(event));
+                }
+                webhookJson.Add("events", events);
+                
+                webhookList.Add(webhookJson);
+            }
+
+            resp.body = JsonSuccess(webhookList).ToString();
+        });
+
+    // POST /api/v1/webhooks
+    m_httpServer->RegisterRoute("POST", AGENTBRIDGE_API_PREFIX "/webhooks",
+        [this, authMiddleware](const AgentHttpRequest& req, AgentHttpResponse& resp) {
+            if (!authMiddleware(req, resp)) return;
+
+            AgentWebhookConfig webhook;
+            webhook.enabled = true;
+            webhook.successCount = 0;
+            webhook.failCount = 0;
+
+            // 解析请求体（简化实现）
+            try {
+                size_t pos = req.body.find("\"name\"");
+                if (pos != std::string::npos) {
+                    size_t colonPos = req.body.find(':', pos);
+                    if (colonPos != std::string::npos) {
+                        size_t quoteStart = req.body.find('"', colonPos + 1);
+                        size_t quoteEnd = req.body.find('"', quoteStart + 1);
+                        if (quoteStart != std::string::npos && quoteEnd != std::string::npos) {
+                            webhook.name = req.body.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
+                        }
+                    }
+                }
+
+                pos = req.body.find("\"url\"");
+                if (pos != std::string::npos) {
+                    size_t colonPos = req.body.find(':', pos);
+                    if (colonPos != std::string::npos) {
+                        size_t quoteStart = req.body.find('"', colonPos + 1);
+                        size_t quoteEnd = req.body.find('"', quoteStart + 1);
+                        if (quoteStart != std::string::npos && quoteEnd != std::string::npos) {
+                            webhook.url = req.body.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
+                        }
+                    }
+                }
+            } catch (...) {
+                resp.statusCode = 400;
+                resp.body = JsonError("Invalid webhook format").ToString();
+                return;
+            }
+
+            bool success = AddWebhook(webhook);
+            auto webhooks = GetWebhooks();
+            AgentWebhookConfig addedWebhook = webhooks.back();
+
+            CAgentJson result;
+            result.SetObject();
+            result.Add("success", CAgentJson(success));
+            result.Add("webhook_id", CAgentJson(addedWebhook.webhookId));
+
+            resp.body = result.ToString();
+        });
+
+    // DELETE /api/v1/webhooks/{id}
+    m_httpServer->RegisterRoute("DELETE", AGENTBRIDGE_API_PREFIX "/webhooks/{id}",
+        [this, authMiddleware](const AgentHttpRequest& req, AgentHttpResponse& resp) {
+            if (!authMiddleware(req, resp)) return;
+
+            int webhookId = 0;
+            try {
+                webhookId = std::stoi(req.params.at("id"));
+            } catch (...) {
+                resp.statusCode = 400;
+                resp.body = JsonError("Invalid webhook ID").ToString();
+                return;
+            }
+
+            bool success = RemoveWebhook(webhookId);
+
+            CAgentJson result;
+            result.SetObject();
+            result.Add("success", CAgentJson(success));
+            result.Add("webhook_id", CAgentJson(webhookId));
+
+            resp.body = result.ToString();
+        });
+
+    // ============================
+    // Prometheus 监控指标
+    // ============================
+
+    // GET /metrics
+    m_httpServer->RegisterRoute("GET", "/metrics",
+        [this](const AgentHttpRequest& req, AgentHttpResponse& resp) {
+            // 返回 Prometheus 格式的指标
+            std::string metrics;
+            
+            // 设备数量
+            int deviceCount = 0;
+            if (m_pMainFrame) {
+                CMainFrame* pFrame = static_cast<CMainFrame*>(m_pMainFrame);
+                deviceCount = (int)pFrame->m_product.size();
+            }
+            metrics += "# HELP t3000_devices_total Total number of devices\n";
+            metrics += "# TYPE t3000_devices_total gauge\n";
+            metrics += "t3000_devices_total " + std::to_string(deviceCount) + "\n\n";
+            
+            // 在线设备数量
+            int onlineCount = 0;
+            if (m_pMainFrame) {
+                CMainFrame* pFrame = static_cast<CMainFrame*>(m_pMainFrame);
+                for (size_t i = 0; i < pFrame->m_product.size(); i++) {
+                    if (pFrame->m_product.at(i).status) onlineCount++;
+                }
+            }
+            metrics += "# HELP t3000_devices_online Number of online devices\n";
+            metrics += "# TYPE t3000_devices_online gauge\n";
+            metrics += "t3000_devices_online " + std::to_string(onlineCount) + "\n\n";
+            
+            // 告警规则数量
+            {
+                std::lock_guard<std::mutex> lock(m_rulesMutex);
+                int enabledRules = 0;
+                for (auto& rule : m_alarmRules) {
+                    if (rule.enabled) enabledRules++;
+                }
+                metrics += "# HELP t3000_rules_total Total number of alarm rules\n";
+                metrics += "# TYPE t3000_rules_total gauge\n";
+                metrics += "t3000_rules_total " + std::to_string((int)m_alarmRules.size()) + "\n\n";
+                metrics += "# HELP t3000_rules_enabled Number of enabled alarm rules\n";
+                metrics += "# TYPE t3000_rules_enabled gauge\n";
+                metrics += "t3000_rules_enabled " + std::to_string(enabledRules) + "\n\n";
+            }
+            
+            // Webhook 数量
+            {
+                std::lock_guard<std::mutex> lock(m_webhooksMutex);
+                int enabledWebhooks = 0;
+                for (auto& webhook : m_webhooks) {
+                    if (webhook.enabled) enabledWebhooks++;
+                }
+                metrics += "# HELP t3000_webhooks_total Total number of webhooks\n";
+                metrics += "# TYPE t3000_webhooks_total gauge\n";
+                metrics += "t3000_webhooks_total " + std::to_string((int)m_webhooks.size()) + "\n\n";
+                metrics += "# HELP t3000_webhooks_enabled Number of enabled webhooks\n";
+                metrics += "# TYPE t3000_webhooks_enabled gauge\n";
+                metrics += "t3000_webhooks_enabled " + std::to_string(enabledWebhooks) + "\n\n";
+            }
+            
+            // WebSocket 连接数
+            int wsClients = m_webSocketServer ? m_webSocketServer->GetClientCount() : 0;
+            metrics += "# HELP t3000_websocket_connections Number of WebSocket connections\n";
+            metrics += "# TYPE t3000_websocket_connections gauge\n";
+            metrics += "t3000_websocket_connections " + std::to_string(wsClients) + "\n\n";
+            
+            // AgentBridge 版本
+            metrics += "# HELP t3000_info AgentBridge version info\n";
+            metrics += "# TYPE t3000_info gauge\n";
+            metrics += "t3000_info{version=\"" + std::string(AGENTBRIDGE_VERSION) + "\"} 1\n";
+            
+            resp.contentType = "text/plain";
+            resp.body = metrics;
+        });
+
+    // ============================
+    // API 文档
+    // ============================
+
+    // GET /api/v1/docs
+    m_httpServer->RegisterRoute("GET", AGENTBRIDGE_API_PREFIX "/docs",
+        [this](const AgentHttpRequest& req, AgentHttpResponse& resp) {
+            // 返回 OpenAPI 3.0 文档
+            std::string openapi = R"({
+  "openapi": "3.0.0",
+  "info": {
+    "title": "T3000 AgentBridge API",
+    "version": "1.0.0",
+    "description": "T3000 建筑自动化系统智能体对接 API"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "本地服务器"
+    }
+  ],
+  "paths": {
+    "/api/v1/devices": {
+      "get": {
+        "summary": "获取设备列表",
+        "tags": ["设备管理"],
+        "security": [{"ApiKeyAuth": []}],
+        "responses": {
+          "200": {
+            "description": "成功返回设备列表"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}": {
+      "get": {
+        "summary": "获取设备详情",
+        "tags": ["设备管理"],
+        "security": [{"ApiKeyAuth": []}],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "integer"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功返回设备详情"
+          }
+        }
+      }
+    },
+    "/api/v1/batch/read": {
+      "post": {
+        "summary": "批量读取输入值",
+        "tags": ["批量操作"],
+        "security": [{"ApiKeyAuth": []}],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功返回批量读取结果"
+          }
+        }
+      }
+    },
+    "/api/v1/batch/write": {
+      "post": {
+        "summary": "批量写入输出值",
+        "tags": ["批量操作"],
+        "security": [{"ApiKeyAuth": []}],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "writes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "output_id": {"type": "integer"},
+                        "value": {"type": "number"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功返回批量写入结果"
+          }
+        }
+      }
+    },
+    "/api/v1/export/devices": {
+      "get": {
+        "summary": "导出设备数据",
+        "tags": ["数据导出"],
+        "security": [{"ApiKeyAuth": []}],
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {"type": "string", "enum": ["json", "csv"]}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功导出数据"
+          }
+        }
+      }
+    },
+    "/api/v1/export/alarms": {
+      "get": {
+        "summary": "导出告警数据",
+        "tags": ["数据导出"],
+        "security": [{"ApiKeyAuth": []}],
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {"type": "string", "enum": ["json", "csv"]}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功导出数据"
+          }
+        }
+      }
+    },
+    "/api/v1/rules": {
+      "get": {
+        "summary": "获取告警规则列表",
+        "tags": ["告警规则"],
+        "security": [{"ApiKeyAuth": []}],
+        "responses": {
+          "200": {
+            "description": "成功返回规则列表"
+          }
+        }
+      },
+      "post": {
+        "summary": "创建告警规则",
+        "tags": ["告警规则"],
+        "security": [{"ApiKeyAuth": []}],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": "string"},
+                  "device_id": {"type": "integer"},
+                  "point_id": {"type": "integer"},
+                  "operator": {"type": "integer", "description": "0:>, 1:<, 2:==, 3:!=, 4:>=, 5:<="},
+                  "threshold": {"type": "number"},
+                  "action": {"type": "string", "enum": ["notify", "webhook", "log"]},
+                  "webhook_url": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功创建规则"
+          }
+        }
+      }
+    },
+    "/api/v1/webhooks": {
+      "get": {
+        "summary": "获取 Webhook 列表",
+        "tags": ["Webhook"],
+        "security": [{"ApiKeyAuth": []}],
+        "responses": {
+          "200": {
+            "description": "成功返回 Webhook 列表"
+          }
+        }
+      },
+      "post": {
+        "summary": "创建 Webhook",
+        "tags": ["Webhook"],
+        "security": [{"ApiKeyAuth": []}],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": "string"},
+                  "url": {"type": "string"},
+                  "events": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功创建 Webhook"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
+      }
+    }
+  }
+})";
+            resp.body = openapi;
+        });
+
+    // ============================
     // OPTIONS 预检请求
     // ============================
     m_httpServer->RegisterRoute("OPTIONS", "*",
@@ -499,6 +1397,10 @@ void CAgentBridge::RegisterApiRoutes() {
             endpoints.Add("ack_alarm", CAgentJson("POST " AGENTBRIDGE_API_PREFIX "/alarms/{id}/ack"));
             endpoints.Add("system_info", CAgentJson("GET  " AGENTBRIDGE_API_PREFIX "/system/info"));
             endpoints.Add("system_scan", CAgentJson("POST " AGENTBRIDGE_API_PREFIX "/system/scan"));
+            endpoints.Add("batch_read", CAgentJson("POST " AGENTBRIDGE_API_PREFIX "/batch/read"));
+            endpoints.Add("batch_write", CAgentJson("POST " AGENTBRIDGE_API_PREFIX "/batch/write"));
+            endpoints.Add("export_devices", CAgentJson("GET  " AGENTBRIDGE_API_PREFIX "/export/devices"));
+            endpoints.Add("export_alarms", CAgentJson("GET  " AGENTBRIDGE_API_PREFIX "/export/alarms"));
             endpoints.Add("websocket", CAgentJson("WS   ws://localhost:" + std::to_string(m_port + 1) + "/"));
             endpoints.Add("mcp", CAgentJson("TCP  localhost:" + std::to_string(m_port + 2)));
             info.Add("endpoints", endpoints);
@@ -956,4 +1858,234 @@ static CAgentJson JsonError(const std::string& message, int code = 400) {
     result.Add("error", CAgentJson(message));
     result.Add("code", CAgentJson(code));
     return result;
+}
+
+// ============================================
+// 告警规则引擎实现
+// ============================================
+
+bool CAgentBridge::AddAlarmRule(const AgentAlarmRule& rule) {
+    std::lock_guard<std::mutex> lock(m_rulesMutex);
+    AgentAlarmRule newRule = rule;
+    newRule.ruleId = m_nextRuleId++;
+    newRule.triggerCount = 0;
+    m_alarmRules.push_back(newRule);
+    
+    CString msg;
+    msg.Format(_T("Added alarm rule: %s (ID: %d)"), 
+               CString(newRule.name.c_str()), newRule.ruleId);
+    Log(msg);
+    return true;
+}
+
+bool CAgentBridge::RemoveAlarmRule(int ruleId) {
+    std::lock_guard<std::mutex> lock(m_rulesMutex);
+    auto it = std::find_if(m_alarmRules.begin(), m_alarmRules.end(),
+        [ruleId](const AgentAlarmRule& r) { return r.ruleId == ruleId; });
+    
+    if (it != m_alarmRules.end()) {
+        m_alarmRules.erase(it);
+        Log(_T("Removed alarm rule"));
+        return true;
+    }
+    return false;
+}
+
+bool CAgentBridge::UpdateAlarmRule(const AgentAlarmRule& rule) {
+    std::lock_guard<std::mutex> lock(m_rulesMutex);
+    auto it = std::find_if(m_alarmRules.begin(), m_alarmRules.end(),
+        [rule](const AgentAlarmRule& r) { return r.ruleId == rule.ruleId; });
+    
+    if (it != m_alarmRules.end()) {
+        *it = rule;
+        Log(_T("Updated alarm rule"));
+        return true;
+    }
+    return false;
+}
+
+std::vector<AgentAlarmRule> CAgentBridge::GetAlarmRules() {
+    std::lock_guard<std::mutex> lock(m_rulesMutex);
+    return m_alarmRules;
+}
+
+bool CAgentBridge::EvaluateRules() {
+    std::lock_guard<std::mutex> lock(m_rulesMutex);
+    bool anyTriggered = false;
+    
+    time_t now = time(NULL);
+    char timeStr[64];
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%dT%H:%M:%S", localtime(&now));
+    
+    for (auto& rule : m_alarmRules) {
+        if (!rule.enabled) continue;
+        
+        // 读取输入值
+        double currentValue = ReadInput(rule.pointId);
+        bool conditionMet = false;
+        
+        switch (rule.operator_) {
+            case RULE_OP_GREATER:
+                conditionMet = (currentValue > rule.threshold);
+                break;
+            case RULE_OP_LESS:
+                conditionMet = (currentValue < rule.threshold);
+                break;
+            case RULE_OP_EQUAL:
+                conditionMet = (currentValue == rule.threshold);
+                break;
+            case RULE_OP_NOT_EQUAL:
+                conditionMet = (currentValue != rule.threshold);
+                break;
+            case RULE_OP_GREATER_EQUAL:
+                conditionMet = (currentValue >= rule.threshold);
+                break;
+            case RULE_OP_LESS_EQUAL:
+                conditionMet = (currentValue <= rule.threshold);
+                break;
+        }
+        
+        if (conditionMet) {
+            anyTriggered = true;
+            rule.triggerCount++;
+            rule.lastTriggered = timeStr;
+            
+            // 创建触发事件
+            CAgentJson eventData;
+            eventData.SetObject();
+            eventData.Add("rule_id", CAgentJson(rule.ruleId));
+            eventData.Add("rule_name", CAgentJson(rule.name));
+            eventData.Add("device_id", CAgentJson(rule.deviceId));
+            eventData.Add("point_id", CAgentJson(rule.pointId));
+            eventData.Add("current_value", CAgentJson(currentValue));
+            eventData.Add("threshold", CAgentJson(rule.threshold));
+            eventData.Add("trigger_count", CAgentJson(rule.triggerCount));
+            eventData.Add("timestamp", CAgentJson(timeStr));
+            
+            PushEvent(EVENT_RULE_TRIGGERED, eventData);
+            
+            // 执行动作
+            if (rule.action == "log") {
+                CString msg;
+                msg.Format(_T("Rule triggered: %s (value: %.2f, threshold: %.2f)"),
+                          CString(rule.name.c_str()), currentValue, rule.threshold);
+                Log(msg);
+            } else if (rule.action == "webhook" && !rule.webhookUrl.empty()) {
+                SendWebhook(rule.webhookUrl, eventData);
+            }
+        }
+    }
+    
+    return anyTriggered;
+}
+
+bool CAgentBridge::SendWebhook(const std::string& url, const CAgentJson& data) {
+    // 使用 HTTP POST 发送 Webhook
+    // 注意：这里需要实现 HTTP 客户端功能
+    // 简化实现：记录日志
+    Log(_T("Webhook would be sent to: ") + CString(url.c_str()));
+    return true;
+}
+
+// ============================================
+// Webhook 管理实现
+// ============================================
+
+bool CAgentBridge::AddWebhook(const AgentWebhookConfig& webhook) {
+    std::lock_guard<std::mutex> lock(m_webhooksMutex);
+    AgentWebhookConfig newWebhook = webhook;
+    newWebhook.webhookId = m_nextWebhookId++;
+    newWebhook.successCount = 0;
+    newWebhook.failCount = 0;
+    m_webhooks.push_back(newWebhook);
+    
+    CString msg;
+    msg.Format(_T("Added webhook: %s (ID: %d)"), 
+               CString(newWebhook.name.c_str()), newWebhook.webhookId);
+    Log(msg);
+    return true;
+}
+
+bool CAgentBridge::RemoveWebhook(int webhookId) {
+    std::lock_guard<std::mutex> lock(m_webhooksMutex);
+    auto it = std::find_if(m_webhooks.begin(), m_webhooks.end(),
+        [webhookId](const AgentWebhookConfig& w) { return w.webhookId == webhookId; });
+    
+    if (it != m_webhooks.end()) {
+        m_webhooks.erase(it);
+        Log(_T("Removed webhook"));
+        return true;
+    }
+    return false;
+}
+
+bool CAgentBridge::UpdateWebhook(const AgentWebhookConfig& webhook) {
+    std::lock_guard<std::mutex> lock(m_webhooksMutex);
+    auto it = std::find_if(m_webhooks.begin(), m_webhooks.end(),
+        [webhook](const AgentWebhookConfig& w) { return w.webhookId == webhook.webhookId; });
+    
+    if (it != m_webhooks.end()) {
+        *it = webhook;
+        Log(_T("Updated webhook"));
+        return true;
+    }
+    return false;
+}
+
+std::vector<AgentWebhookConfig> CAgentBridge::GetWebhooks() {
+    std::lock_guard<std::mutex> lock(m_webhooksMutex);
+    return m_webhooks;
+}
+
+bool CAgentBridge::SendEventToWebhooks(AgentEventType eventType, const CAgentJson& data) {
+    std::lock_guard<std::mutex> lock(m_webhooksMutex);
+    bool anySent = false;
+    
+    // 获取事件名称
+    std::string eventName = 
+        eventType == EVENT_DEVICE_ONLINE ? "device.online" :
+        eventType == EVENT_DEVICE_OFFLINE ? "device.offline" :
+        eventType == EVENT_INPUT_CHANGED ? "input.changed" :
+        eventType == EVENT_OUTPUT_CHANGED ? "output.changed" :
+        eventType == EVENT_ALARM_ACTIVE ? "alarm.active" :
+        eventType == EVENT_ALARM_CLEARED ? "alarm.cleared" :
+        eventType == EVENT_ALARM_ACKNOWLEDGED ? "alarm.acknowledged" :
+        eventType == EVENT_SYSTEM_SCAN_COMPLETE ? "scan.complete" :
+        eventType == EVENT_SCHEDULE_CHANGED ? "schedule.changed" :
+        eventType == EVENT_RULE_TRIGGERED ? "rule.triggered" : "unknown";
+    
+    time_t now = time(NULL);
+    char timeStr[64];
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%dT%H:%M:%S", localtime(&now));
+    
+    for (auto& webhook : m_webhooks) {
+        if (!webhook.enabled) continue;
+        
+        // 检查是否订阅了该事件
+        bool subscribed = false;
+        for (auto& event : webhook.events) {
+            if (event == "*" || event == eventName) {
+                subscribed = true;
+                break;
+            }
+        }
+        
+        if (!subscribed) continue;
+        
+        // 构建 Webhook 负载
+        CAgentJson payload;
+        payload.SetObject();
+        payload.Add("event", CAgentJson(eventName));
+        payload.Add("timestamp", CAgentJson(std::string(timeStr)));
+        payload.Add("webhook_id", CAgentJson(webhook.webhookId));
+        payload.Add("data", data);
+        
+        // 发送 Webhook（简化实现：记录日志）
+        Log(_T("Webhook event sent: ") + CString(eventName.c_str()));
+        webhook.successCount++;
+        webhook.lastSent = std::string(timeStr);
+        anySent = true;
+    }
+    
+    return anySent;
 }

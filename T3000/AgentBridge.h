@@ -178,7 +178,51 @@ enum AgentEventType {
     EVENT_ALARM_CLEARED,
     EVENT_ALARM_ACKNOWLEDGED,
     EVENT_SYSTEM_SCAN_COMPLETE,
-    EVENT_SCHEDULE_CHANGED
+    EVENT_SCHEDULE_CHANGED,
+    EVENT_RULE_TRIGGERED  // 新增：规则触发事件
+};
+
+// ============================================
+// 告警规则
+// ============================================
+enum AgentRuleOperator {
+    RULE_OP_GREATER = 0,      // >
+    RULE_OP_LESS,             // <
+    RULE_OP_EQUAL,            // ==
+    RULE_OP_NOT_EQUAL,        // !=
+    RULE_OP_GREATER_EQUAL,    // >=
+    RULE_OP_LESS_EQUAL        // <=
+};
+
+struct AgentAlarmRule {
+    int ruleId;
+    std::string name;
+    std::string description;
+    int deviceId;
+    int pointId;
+    AgentRuleOperator operator_;
+    double threshold;
+    bool enabled;
+    std::string action;  // "notify", "webhook", "log"
+    std::string webhookUrl;  // 如果 action 是 webhook
+    std::string lastTriggered;
+    int triggerCount;
+};
+
+// ============================================
+// Webhook 配置
+// ============================================
+struct AgentWebhookConfig {
+    int webhookId;
+    std::string name;
+    std::string url;
+    std::string secret;  // HMAC 签名密钥
+    std::vector<std::string> events;  // 订阅的事件类型
+    bool enabled;
+    int successCount;
+    int failCount;
+    std::string lastSent;
+    std::string lastError;
 };
 
 // ============================================
@@ -233,6 +277,21 @@ public:
     bool StartScan(bool fullScan);
     CAgentJson GetSystemInfo();
 
+    // 告警规则管理
+    bool AddAlarmRule(const AgentAlarmRule& rule);
+    bool RemoveAlarmRule(int ruleId);
+    bool UpdateAlarmRule(const AgentAlarmRule& rule);
+    std::vector<AgentAlarmRule> GetAlarmRules();
+    bool EvaluateRules();
+    bool SendWebhook(const std::string& url, const CAgentJson& data);
+
+    // Webhook 管理
+    bool AddWebhook(const AgentWebhookConfig& webhook);
+    bool RemoveWebhook(int webhookId);
+    bool UpdateWebhook(const AgentWebhookConfig& webhook);
+    std::vector<AgentWebhookConfig> GetWebhooks();
+    bool SendEventToWebhooks(AgentEventType eventType, const CAgentJson& data);
+
     // 日志
     void Log(const CString& message);
     void LogError(const CString& message);
@@ -255,6 +314,16 @@ private:
 
     std::mutex m_eventMutex;
     std::vector<std::function<void(const CAgentJson&)>> m_eventListeners;
+
+    // 告警规则
+    std::mutex m_rulesMutex;
+    std::vector<AgentAlarmRule> m_alarmRules;
+    int m_nextRuleId;
+
+    // Webhook
+    std::mutex m_webhooksMutex;
+    std::vector<AgentWebhookConfig> m_webhooks;
+    int m_nextWebhookId;
 
     void RegisterApiRoutes();
     void OnRequest(const AgentHttpRequest& request, AgentHttpResponse& response);

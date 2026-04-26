@@ -42,6 +42,8 @@ def test_rest_api():
         ("GET", f"{API_PREFIX}/system/info", "系统信息"),
         ("GET", f"{API_PREFIX}/system/status", "系统状态"),
         ("GET", f"{API_PREFIX}/devices", "设备列表"),
+        ("GET", f"{API_PREFIX}/docs", "API 文档"),
+        ("GET", "/metrics", "Prometheus 指标"),
     ]
     
     for method, path, desc in endpoints:
@@ -73,6 +75,55 @@ def test_rest_api():
     try:
         data = json.dumps({"full_scan": False}).encode()
         req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            result = json.loads(resp.read().decode())
+            print(f"  状态码: {resp.status}")
+            print(f"  响应: {json.dumps(result, ensure_ascii=False)}")
+    except Exception as e:
+        print(f"  错误: {e}")
+    
+    # 测试批量读取
+    print(f"\n[POST] 批量读取输入值")
+    url = BASE_URL + f"{API_PREFIX}/batch/read"
+    try:
+        data = json.dumps({"input_ids": [101, 102, 103]}).encode()
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            result = json.loads(resp.read().decode())
+            print(f"  状态码: {resp.status}")
+            print(f"  响应: {json.dumps(result, ensure_ascii=False)}")
+    except Exception as e:
+        print(f"  错误: {e}")
+    
+    # 测试数据导出（CSV）
+    print(f"\n[GET] 导出设备数据（CSV）")
+    url = BASE_URL + f"{API_PREFIX}/export/devices?format=csv"
+    try:
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            csv_data = resp.read().decode()
+            print(f"  状态码: {resp.status}")
+            print(f"  CSV 数据:\n{csv_data[:500]}")
+    except Exception as e:
+        print(f"  错误: {e}")
+    
+    # 测试告警规则
+    print(f"\n[GET] 获取告警规则列表")
+    url = BASE_URL + f"{API_PREFIX}/rules"
+    try:
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            result = json.loads(resp.read().decode())
+            print(f"  状态码: {resp.status}")
+            print(f"  响应: {json.dumps(result, ensure_ascii=False)}")
+    except Exception as e:
+        print(f"  错误: {e}")
+    
+    # 测试 Webhook
+    print(f"\n[GET] 获取 Webhook 列表")
+    url = BASE_URL + f"{API_PREFIX}/webhooks"
+    try:
+        req = urllib.request.Request(url, headers=headers, method="GET")
         with urllib.request.urlopen(req, timeout=5) as resp:
             result = json.loads(resp.read().decode())
             print(f"  状态码: {resp.status}")

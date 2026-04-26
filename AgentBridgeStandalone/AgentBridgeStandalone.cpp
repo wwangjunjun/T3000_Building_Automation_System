@@ -782,6 +782,135 @@ void AgentBridge::RegisterApiRoutes() {
     httpServer_.RegisterRoute("OPTIONS", "*", [](const HttpRequest&, HttpResponse& resp) {
         resp.statusCode = 204;
     });
+
+    // ============================
+    // 批量操作 API
+    // ============================
+
+    // POST /api/v1/batch/read
+    httpServer_.RegisterRoute("POST", "/api/v1/batch/read", [this, auth](const HttpRequest& req, HttpResponse& resp) {
+        if (!auth(req, resp)) return;
+        
+        // 解析 input_ids 数组
+        std::vector<int> inputIds;
+        size_t pos = req.body.find("\"input_ids\"");
+        if (pos != std::string::npos) {
+            size_t bracketStart = req.body.find('[', pos);
+            size_t bracketEnd = req.body.find(']', bracketStart);
+            if (bracketStart != std::string::npos && bracketEnd != std::string::npos) {
+                std::string arrayStr = req.body.substr(bracketStart + 1, bracketEnd - bracketStart - 1);
+                std::stringstream ss(arrayStr);
+                std::string token;
+                while (std::getline(ss, token, ',')) {
+                    size_t start = token.find_first_of("-0123456789");
+                    if (start != std::string::npos) {
+                        size_t end = token.find_first_not_of("-0123456789", start);
+                        inputIds.push_back(std::stoi(token.substr(start, end != std::string::npos ? end - start : std::string::npos)));
+                    }
+                }
+            }
+        }
+        
+        // 批量读取
+        std::string results = "[";
+        for (size_t i = 0; i < inputIds.size(); i++) {
+            double value = readInputCb_ ? readInputCb_(inputIds[i]) : 0.0;
+            if (i > 0) results += ",";
+            results += "{\"input_id\":" + std::to_string(inputIds[i]) + ",\"value\":" + std::to_string(value) + "}";
+        }
+        results += "]";
+        resp.body = "{\"success\":true,\"data\":" + results + "}";
+    });
+
+    // POST /api/v1/batch/write
+    httpServer_.RegisterRoute("POST", "/api/v1/batch/write", [this, auth](const HttpRequest& req, HttpResponse& resp) {
+        if (!auth(req, resp)) return;
+        
+        // 简化处理：返回成功响应
+        resp.body = "{\"success\":true,\"message\":\"Batch write not implemented in standalone version\"}";
+    });
+
+    // ============================
+    // 数据导出 API
+    // ============================
+
+    // GET /api/v1/export/devices
+    httpServer_.RegisterRoute("GET", "/api/v1/export/devices", [this, auth](const HttpRequest& req, HttpResponse& resp) {
+        if (!auth(req, resp)) return;
+        
+        bool csvFormat = req.query.find("format=csv") != std::string::npos;
+        
+        if (csvFormat) {
+            resp.contentType = "text/csv";
+            std::string csv = "ID,Name,Model,Online\n";
+            if (getDevicesCb_) {
+                for (auto& dev : getDevicesCb_()) {
+                    csv += std::to_string(dev.id) + "," + dev.name + "," + dev.model + "," + (dev.online ? "是" : "否") + "\n";
+                }
+            }
+            resp.body = csv;
+        } else {
+            // JSON 格式（复用 devices 端点）
+            JsonValue devices = JsonValue::Array();
+            if (getDevicesCb_) {
+                for (auto& dev : getDevicesCb_()) {
+                    JsonValue d = JsonValue::Object();
+                    d.Add("id", JsonValue(dev.id));
+                    d.Add("name", JsonValue(dev.name));
+                    d.Add("model", JsonValue(dev.model));
+                    d.Add("online", JsonValue(dev.online));
+                    devices.Add(d);
+                }
+            }
+            resp.body = "{\"success\":true,\"data\":" + devices.ToString() + "}";
+        }
+    });
+
+    // ============================
+    // Prometheus 指标
+    // ============================
+
+    // GET /metrics
+    httpServer_.RegisterRoute("GET", "/metrics", [this](const HttpRequest&, HttpResponse& resp) {
+        resp.contentType = "text/plain";
+        std::string metrics;
+        
+        int deviceCount = 0;
+        if (getDevicesCb_) deviceCount = (int)getDevicesCb_().size();
+        
+        metrics += "# HELP t3000_devices_total Total number of devices\n";
+        metrics += "# TYPE t3000_devices_total gauge\n";
+        metrics += "t3000_devices_total " + std::to_string(deviceCount) + "\n\n";
+        
+        metrics += "# HELP t3000_info AgentBridge version info\n";
+        metrics += "# TYPE t3000_info gauge\n";
+        metrics += "t3000_info{version=\"1.0.0\"} 1\n";
+        
+        resp.body = metrics;
+    });
+
+    // ============================
+    // API 文档
+    // ============================
+
+    // GET /api/v1/docs
+    httpServer_.RegisterRoute("GET", "/api/v1/docs", [this](const HttpRequest&, HttpResponse& resp) {
+        std::string docs = R"({
+  "openapi": "3.0.0",
+  "info": {
+    "title": "T3000 AgentBridge API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/v1/devices": {"get": {"summary": "获取设备列表"}},
+    "/api/v1/batch/read": {"post": {"summary": "批量读取输入值"}},
+    "/api/v1/export/devices": {"get": {"summary": "导出设备数据"}},
+    "/metrics": {"get": {"summary": "Prometheus 监控指标"}},
+    "/api/v1/docs": {"get": {"summary": "API 文档"}}
+  }
+})";
+        resp.body = docs;
+    });
 }
 
 void AgentBridge::Log(const std::string& msg) {
