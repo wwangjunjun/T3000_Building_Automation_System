@@ -203,10 +203,7 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: |
-          *.exe
-          Output/*.exe
-          T3000InstallShield/Output/*.exe
+        files: T3000_建筑自动化系统_Setup.exe
         draft: false
         prerelease: false
         generate_release_notes: true
