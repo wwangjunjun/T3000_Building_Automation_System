@@ -204,7 +204,8 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          Output/T3000_建筑自动化系统_Setup.exe
+          Output/*.exe
+          T3000InstallShield/Output/*.exe
         draft: false
         prerelease: false
         generate_release_notes: true
