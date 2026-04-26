@@ -32,6 +32,10 @@
     #include <fcntl.h>
     #include <errno.h>
     #include <poll.h>
+    #include <openssl/sha.h>
+    #include <openssl/bio.h>
+    #include <openssl/evp.h>
+    #include <openssl/buffer.h>
     typedef int SOCKET;
     #define INVALID_SOCKET (-1)
     #define SOCKET_ERROR (-1)

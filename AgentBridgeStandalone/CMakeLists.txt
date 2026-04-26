@@ -9,17 +9,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 不依赖 MFC，可在 Linux/Windows 编译
 # ============================================
 
-# 源文件（排除 MFC 依赖部分）
+# 源文件（独立跨平台实现，不依赖 MFC）
 set(AGENTBRIDGE_SOURCES
-    AgentHttpServer.cpp
-    AgentWebSocket.cpp
-    AgentMcpServer.cpp
+    AgentBridgeStandalone.cpp
 )
 
 set(AGENTBRIDGE_HEADERS
-    AgentHttpServer.h
-    AgentWebSocket.h
-    AgentMcpServer.h
+    AgentBridgeStandalone.h
 )
 
 # ============================================
@@ -31,9 +27,10 @@ if(WIN32)
     add_definitions(-DNOMINMAX)
     set(LIBS httpapi ws2_32 crypt32 bcrypt)
 elseif(UNIX)
-    # Linux: 使用 epoll + 标准 socket
+    # Linux: 使用标准 socket + OpenSSL
     add_definitions(-DLINUX)
-    set(LIBS pthread ssl crypto)
+    find_package(OpenSSL REQUIRED)
+    set(LIBS pthread OpenSSL::SSL OpenSSL::Crypto)
 endif()
 
 # ============================================

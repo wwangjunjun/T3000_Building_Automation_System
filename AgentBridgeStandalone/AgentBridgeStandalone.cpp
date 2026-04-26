@@ -4,11 +4,6 @@
 
 #ifdef _WIN32
     #pragma comment(lib, "ws2_32")
-#else
-    #include <openssl/sha.h>
-    #include <openssl/bio.h>
-    #include <openssl/evp.h>
-    #include <base64.h>
 #endif
 
 // ============================================

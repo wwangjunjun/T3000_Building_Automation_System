@@ -50,12 +50,12 @@ jobs:
 
     - name: 还原 NuGet 包
       run: |
-        msbuild -restore T3000 - VS2019.sln /p:Configuration=${{ env.BUILD_TYPE }} /p:Platform=${{ env.PLATFORM }}
+        msbuild -restore "T3000 - VS2019.sln" /p:Configuration=${{ env.BUILD_TYPE }} /p:Platform=${{ env.PLATFORM }}
       shell: pwsh
 
     - name: 编译主程序
       run: |
-        msbuild T3000 - VS2019.sln `
+        msbuild "T3000 - VS2019.sln" `
           /p:Configuration=${{ env.BUILD_TYPE }} `
           /p:Platform=${{ env.PLATFORM }} `
           /t:Rebuild `
