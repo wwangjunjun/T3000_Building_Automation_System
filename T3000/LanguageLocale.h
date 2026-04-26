@@ -24,14 +24,14 @@ static TCHAR gBufferString[BUFF_SIZE];
 class CLanguageLocale  
 {
 public:
-	void AddCatalogLookupPath(LPCTSTR szPath);//ÉèÖÃÎÄ¼þ²éÕÒÂ·¾¶, // Set file search path
+	void AddCatalogLookupPath(LPCTSTR szPath);//ï¿½ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½Â·ï¿½ï¿½, // Set file search path
 	bool SetLanguage(int nID);
 	CLanguageLocale();
 	virtual ~CLanguageLocale();
-	enum
-	{
-		LANGUAGE_ENGLISH= 0,//¼òÌåÖÐÎÄ (Simplified Chinese)
-		LANGUAGE_PERSONAL  //Ó¢ÎÄ (English)
+enum
+{
+		LANGUAGE_CHINESE = 0,  // ç®€ä½“ä¸­æ–‡ (Simplified Chinese) - é»˜è®¤
+		LANGUAGE_ENGLISH = 1   // è‹±æ–‡ (English)
 	};
 private:
 	CString  m_strPath;

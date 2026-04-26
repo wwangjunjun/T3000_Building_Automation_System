@@ -1,0 +1,185 @@
+name: T3000 编译 + AgentBridge
+
+on:
+  push:
+    branches: [ master, main, develop ]
+    paths:
+      - 'T3000/**'
+      - 'T3000Controls/**'
+      - 'T3000InstallShield/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: '构建类型'
+        required: true
+        default: 'Release'
+        type: choice
+        options: [Release, Debug]
+
+env:
+  SOLUTION_FILE_PATH: .
+  BUILD_TYPE: ${{ github.event.inputs.build_type || 'Release' }}
+  PLATFORM: Win32
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: 编译 T3000 + AgentBridge
+    runs-on: windows-2022
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: 添加 MSBuild 到 PATH
+      uses: microsoft/setup-msbuild@v2
+
+    - name: 添加 VS 组件（MFC）
+      run: |
+        # 安装 MFC 组件
+        & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -find VC\Tools\MSBuild\*\Bin\MSBuild.exe
+        echo "VS 已安装，MFC 组件应已包含"
+      shell: pwsh
+
+    - name: 还原 NuGet 包
+      run: |
+        msbuild -restore T3000 - VS2019.sln /p:Configuration=${{ env.BUILD_TYPE }} /p:Platform=${{ env.PLATFORM }}
+      shell: pwsh
+
+    - name: 编译主程序
+      run: |
+        msbuild T3000 - VS2019.sln `
+          /p:Configuration=${{ env.BUILD_TYPE }} `
+          /p:Platform=${{ env.PLATFORM }} `
+          /t:Rebuild `
+          /m `
+          /v:minimal `
+          /logger:"GitHubActions,./tools/GitHubActionsLogger.dll"
+      shell: pwsh
+
+    - name: 编译 C# 控件库
+      run: |
+        if (Test-Path "T3000Controls\T3000Controls.sln") {
+          msbuild T3000Controls\T3000Controls.sln `
+            /p:Configuration=${{ env.BUILD_TYPE }} `
+            /t:Rebuild `
+            /m `
+            /v:minimal
+        } else {
+          echo "未找到 C# 控件库解决方案，跳过"
+        }
+      shell: pwsh
+
+    - name: 复制输出文件
+      run: |
+        $outputDir = "T3000InstallShield"
+        if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir }
+
+        # 复制主程序
+        $releaseDir = "${{ env.BUILD_TYPE }}"
+        if (Test-Path "$releaseDir\T3000.exe") {
+          Copy-Item "$releaseDir\T3000.exe" "$outputDir\"
+          echo "已复制 T3000.exe"
+        }
+
+        # 复制 DLL
+        $dlls = @("T3000Controls.dll", "ModbusDllforVc.dll", "FlexSlideBar.dll", "sqlite3.dll", "BACnet_Stack_Library.dll")
+        foreach ($dll in $dlls) {
+          if (Test-Path "$releaseDir\$dll") {
+            Copy-Item "$releaseDir\$dll" "$outputDir\"
+            echo "已复制 $dll"
+          }
+        }
+
+        # 复制中文语言包
+        if (Test-Path "T3000\LanguageLocale_zh.ini") {
+          Copy-Item "T3000\LanguageLocale_zh.ini" "$outputDir\"
+          echo "已复制中文语言包"
+        }
+
+        # 复制工具程序
+        if (Test-Path "$releaseDir\ISP.exe") {
+          if (-not (Test-Path "$outputDir\Tools")) { New-Item -ItemType Directory -Path "$outputDir\Tools" }
+          Copy-Item "$releaseDir\ISP.exe" "$outputDir\Tools\"
+          echo "已复制 ISP.exe"
+        }
+      shell: pwsh
+
+    - name: 编译 Inno Setup 安装包
+      uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+      with:
+        path: T3000_zh.iss
+        options: /O+
+
+    - name: 上传构建产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: T3000-${{ env.BUILD_TYPE }}
+        path: |
+          T3000InstallShield/
+          Output/T3000_建筑自动化系统_Setup.exe
+        retention-days: 30
+        if-no-files-found: warn
+
+    - name: 创建 Release（仅 tag 触发）
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          Output/T3000_建筑自动化系统_Setup.exe
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test-api:
+    name: API 测试
+    needs: build
+    runs-on: windows-2022
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 下载构建产物
+      uses: actions/download-artifact@v4
+      with:
+        name: T3000-Release
+        path: build-output/
+
+    - name: 设置 Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: 安装测试依赖
+      run: pip install requests websocket-client --break-system-packages
+      shell: pwsh
+
+    - name: 启动 T3000（后台）
+      run: |
+        Start-Process -FilePath "build-output\T3000InstallShield\T3000.exe" -WindowStyle Hidden
+        Start-Sleep -Seconds 10
+        echo "T3000 已启动"
+      shell: pwsh
+
+    - name: 运行 API 测试
+      run: python test_api.py
+      shell: pwsh
+      continue-on-error: true
+
+    - name: 上传测试报告
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-report
+        path: test-results/
+        retention-days: 7

@@ -13,6 +13,11 @@
       <Configuration>Template</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
+      <ClInclude Include="AgentBridge.h" />
+      <ClInclude Include="AgentHttpServer.h" />
+      <ClInclude Include="AgentMcpServer.h" />
+      <ClInclude Include="AgentWebSocket.h" />
+      <ClInclude Include="AgentBridgeDlg.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{F7226464-C41C-4909-BF74-97328B72FFC8}</ProjectGuid>
@@ -439,6 +444,10 @@ XCOPY "$(SolutionDir)DLLs\T3WebviewApi\*" "$(TargetDir)" /D /K /Y</Command>
     <ClCompile Include="WriteSingleRegDlg.cpp" />
     <ClCompile Include="ZigbeeInformationDlg.cpp" />
     <ClCompile Include="ZigbeeRepeater.cpp" />
+    <ClCompile Include="AgentBridge.cpp" />
+    <ClCompile Include="AgentHttpServer.cpp" />
+    <ClCompile Include="AgentMcpServer.cpp" />
+    <ClCompile Include="AgentWebSocket.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="ChartCtrl\ChartBalloonLabel.inl" />

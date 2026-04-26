@@ -685,7 +685,19 @@ BOOL CT3000App::InitInstance()
 		GdiplusStartup(&g_gdiplusToken, &gdiplusStartupInput, NULL);//
 
 
-		 ((CMainFrame*)m_pMainWnd)->InitViews();//
+		((CMainFrame*)m_pMainWnd)->InitViews();//
+
+		// ★ 中文汉化：初始化语言包
+		m_locale.AddCatalogLookupPath(g_strExePth);  // 设置语言包搜索路径
+		int nLang = GetLanguage();  // 从注册表读取语言设置
+		if (nLang == 0) {
+			m_locale.SetLanguage(CLanguageLocale::LANGUAGE_CHINESE);  // 默认中文
+		} else {
+			m_locale.SetLanguage(CLanguageLocale::LANGUAGE_ENGLISH);  // 英文
+		}
+		// 加载语言包后刷新菜单
+		gSetMenuStrings(m_pMainWnd->m_hWnd);
+
 		CString strTile;
         strTile = cs_special_name;
 		strTile+=CurrentT3000Version;

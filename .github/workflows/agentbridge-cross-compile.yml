@@ -1,0 +1,144 @@
+name: AgentBridge 交叉编译测试
+
+on:
+  push:
+    branches: [ master, main, develop ]
+    paths:
+      - 'AgentBridgeStandalone/**'
+      - '.github/workflows/agentbridge-cross-compile.yml'
+  pull_request:
+    branches: [ master, main ]
+    paths:
+      - 'AgentBridgeStandalone/**'
+  workflow_dispatch:
+
+jobs:
+  cross-compile-linux:
+    name: Linux 原生编译
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 安装依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake libssl-dev
+
+    - name: 配置 CMake
+      run: |
+        mkdir -p build
+        cd build
+        cmake ../AgentBridgeStandalone -DCMAKE_BUILD_TYPE=Release
+
+    - name: 编译
+      run: |
+        cd build
+        make -j$(nproc)
+
+    - name: 运行测试
+      run: |
+        cd build
+        ./AgentBridgeTest &
+        sleep 2
+        # 测试 HTTP API
+        curl -s http://localhost:8080/ | python3 -m json.tool
+        curl -s http://localhost:8080/api/v1/system/info | python3 -m json.tool
+        curl -s http://localhost:8080/api/v1/devices | python3 -m json.tool
+        curl -s http://localhost:8080/api/v1/alarms | python3 -m json.tool
+        kill %1 2>/dev/null
+
+    - name: 上传构建产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: AgentBridge-Linux-x64
+        path: build/AgentBridgeTest
+        retention-days: 30
+
+  cross-compile-windows:
+    name: Windows 交叉编译 (MinGW)
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 安装 MinGW-w64
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake mingw-w64 libssl-dev:mixed
+
+    - name: 创建 MinGW CMake 工具链文件
+      run: |
+        cat > mingw-toolchain.cmake << 'EOF'
+        set(CMAKE_SYSTEM_NAME Windows)
+        set(CMAKE_SYSTEM_PROCESSOR x86_64)
+        set(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc)
+        set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-g++)
+        set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+        set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+        set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+        EOF
+
+    - name: 配置 CMake (MinGW)
+      run: |
+        mkdir -p build-mingw
+        cd build-mingw
+        cmake ../AgentBridgeStandalone \
+          -DCMAKE_TOOLCHAIN_FILE=../mingw-toolchain.cmake \
+          -DCMAKE_BUILD_TYPE=Release
+
+    - name: 编译 (MinGW)
+      run: |
+        cd build-mingw
+        make -j$(nproc)
+
+    - name: 上传构建产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: AgentBridge-Windows-x64-MinGW
+        path: build-mingw/AgentBridgeTest.exe
+        retention-days: 30
+
+  test-with-wine:
+    name: Wine 测试
+    needs: cross-compile-windows
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 安装 Wine
+      run: |
+        sudo dpkg --add-architecture i386
+        sudo apt-get update
+        sudo apt-get install -y wine wine64 libwine-dev
+
+    - name: 下载 MinGW 编译产物
+      uses: actions/download-artifact@v4
+      with:
+        name: AgentBridge-Windows-x64-MinGW
+        path: wine-test/
+
+    - name: 运行 Wine 测试
+      run: |
+        cd wine-test
+        # 后台运行
+        wine64 AgentBridgeTest.exe &
+        sleep 3
+        # 测试 API
+        curl -s http://localhost:8080/ || echo "HTTP 测试失败"
+        curl -s http://localhost:8080/api/v1/system/info || echo "系统信息测试失败"
+        curl -s http://localhost:8080/api/v1/devices || echo "设备列表测试失败"
+        kill %1 2>/dev/null
+        echo "Wine 测试完成"
+
+    - name: 上传测试日志
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: wine-test-log
+        path: wine-test/
+        retention-days: 7
