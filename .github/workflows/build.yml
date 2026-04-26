@@ -3,6 +3,7 @@ name: T3000 编译 + AgentBridge
 on:
   push:
     branches: [ master, main, develop ]
+    tags: [ 'v*' ]
     paths:
       - 'T3000/**'
       - 'T3000Controls/**'
