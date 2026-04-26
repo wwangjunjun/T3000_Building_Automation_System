@@ -37,7 +37,16 @@ jobs:
     - name: 编译
       run: |
         cd build
-        make -j$(nproc) 2>&1
+        make -j$(nproc) 2>&1 | tee ../build-log.txt
+        echo "=== 编译完成 ==="
+
+    - name: 上传编译日志
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log
+        path: build-log.txt
+        retention-days: 7
 
     - name: 运行测试
       run: |
